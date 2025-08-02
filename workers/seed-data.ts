@@ -12,7 +12,7 @@ import {
 } from './db/schema';
 
 const client = createClient({
-  url: 'file:.wrangler/state/v3/d1/miniflare-D1DatabaseObject/68ac3c8ac2484ab5dd28be90eb723c4cae2f05469e8abbac31b835ce3ae4af89.sqlite',
+  url: 'file:.wrangler/state/v3/d1/2b35d4d42e3c9f6b5ad5b5579a7b1470c66e69f6b33a31e3f5a0095cc6d18656.sqlite',
 });
 
 const db = drizzle(client);
@@ -37,7 +37,11 @@ async function seedData() {
     ];
 
     for (const spec of specialtyData) {
-      await db.insert(specialties).values(spec).onConflictDoNothing();
+      try {
+        await db.insert(specialties).values(spec).onConflictDoNothing();
+      } catch (error) {
+        console.log(`専門科 "${spec.displayName}" の挿入をスキップ (既に存在するか、エラー):`, error);
+      }
     }
 
     // 資格マスターデータの挿入

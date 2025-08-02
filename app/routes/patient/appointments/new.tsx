@@ -155,8 +155,6 @@ export default function NewAppointment() {
   // 外部API関連の状態
   const [isExternalAPILoading, setIsExternalAPILoading] = useState(false)
   const [externalAPIResult, setExternalAPIResult] = useState<{
-    recommendedSpecialty: string
-    urgency: 'low' | 'medium' | 'high'
     comment: string
   } | null>(null)
   const [externalAPIError, setExternalAPIError] = useState<string | null>(null)
@@ -316,8 +314,6 @@ export default function NewAppointment() {
       }
 
       const result = await response.json() as {
-        recommendedSpecialty: string
-        urgency: 'low' | 'medium' | 'high'
         comment: string
       }
       setExternalAPIResult(result)
@@ -647,20 +643,6 @@ export default function NewAppointment() {
                       <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
                         <h4 className="font-medium text-blue-800 mb-2">AI分析結果</h4>
                         <div className="text-sm text-blue-700">
-                          <div className="mb-2">
-                            <strong>推奨診療科:</strong> {externalAPIResult.recommendedSpecialty}
-                          </div>
-                          <div className="mb-2">
-                            <strong>緊急度:</strong> 
-                            <span className={`ml-1 px-2 py-1 rounded text-xs ${
-                              externalAPIResult.urgency === 'high' ? 'bg-red-100 text-red-800' :
-                              externalAPIResult.urgency === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                              'bg-green-100 text-green-800'
-                            }`}>
-                              {externalAPIResult.urgency === 'high' ? '高' :
-                               externalAPIResult.urgency === 'medium' ? '中' : '低'}
-                            </span>
-                          </div>
                           <div>
                             <strong>分析コメント:</strong> {externalAPIResult.comment}
                           </div>

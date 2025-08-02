@@ -70,7 +70,7 @@ async function callDifyAPI(symptoms: string, context: any, env: any) {
   const chatEndpoint = `${difyBaseUrl}/chat-messages`
   
   // 医療症状分析用のプロンプト
-  const prompt = `症状: ${symptoms}`
+  const prompt = `${symptoms}`
  
   const response = await fetch(chatEndpoint, {
     method: 'POST',
@@ -98,21 +98,23 @@ async function callDifyAPI(symptoms: string, context: any, env: any) {
 function parseDifyResponse(difyResponse: any) {
   try {
     // Difyのレスポンスから回答テキストを取得
-    const answer = difyResponse.answer || difyResponse.message || ''
+    const answer = difyResponse.message || difyResponse.text || ''
+    console.log('DIFYのレスポンス', answer)
     
     // JSON形式の回答を抽出
-    const jsonMatch = answer.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0])
-      return {
-        recommendedSpecialty: parsed.recommendedSpecialty || '内科',
-        urgency: parsed.urgency || 'low',
-        comment: parsed.comment || '症状を詳しく診察する必要があります。'
-      }
+    // const jsonMatch = answer.match(/\{[\s\S]*\}/)
+    // if (jsonMatch) {
+    //   const parsed = JSON.parse(jsonMatch[0])
+    //   return {
+    //     comment: parsed.comment || '症状を詳しく診察する必要があります。'
+    //   }
+    // }
+    return {
+      comment: answer || '症状を詳しく診察する必要があります。'
     }
     
     // JSONが見つからない場合は、テキストから推測
-    return parseTextResponse(answer)
+    // return parseTextResponse(answer)
   } catch (error) {
     console.error('Failed to parse Dify response:', error)
     // フォールバック: テキストから推測

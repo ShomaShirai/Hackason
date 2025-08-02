@@ -16,6 +16,7 @@ npm install
 
 # Cloudflare設定ファイルのセットアップ
 cp wrangler.example.jsonc wrangler.jsonc
+
 # wrangler.jsonc内の以下の項目を編集:
 # - name: your-cloudflare-project-name を自分のプロジェクト名に変更
 # - database_id: D1データベースIDを設定（wrangler d1 createで作成後に取得）
