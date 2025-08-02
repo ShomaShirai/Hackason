@@ -56,11 +56,16 @@ export function CloudflareRealtimeVideo({
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [connectionState, setConnectionState] = useState<RTCPeerConnectionState>('new');
   const [iceConnectionState, setIceConnectionState] = useState<RTCIceConnectionState>('new');
-  const [mediaControls, setMediaControls] = useState<MediaControls>({ audio: false, video: false });
+  const [mediaControls, setMediaControls] = useState<MediaControls>({
+    audio: false, // デフォルトで音声オフ
+    video: false
+  });
   const [localStream, setLocalStreamState] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showRetryButton, setShowRetryButton] = useState(false);
+  const [remoteVideoEnabled, setRemoteVideoEnabled] = useState(true);
+  const [remoteAudioEnabled, setRemoteAudioEnabled] = useState(true);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -115,7 +120,7 @@ export function CloudflareRealtimeVideo({
 
   // セッション作成または参加
   const initializeSession = useCallback(async () => {
-    console.log('🚀 initializeSession開始', { appointmentId });
+    console.log('🚀 initializeSession開始', { appointmentId, userType });
     setIsLoading(true);
     setError(null);
 
@@ -151,6 +156,7 @@ export function CloudflareRealtimeVideo({
 
       if (!response.ok) {
         const errorData = await response.json() as { error?: string };
+        console.error('❌ ビデオセッション作成エラー:', errorData);
         throw new Error(errorData.error || 'Failed to create session');
       }
 
@@ -382,7 +388,7 @@ export function CloudflareRealtimeVideo({
       });
 
       if (response.ok) {
-        const data = await response.json();
+        const data = await response.json() as AppointmentDetails;
         setAppointmentDetails(data);
       } else {
         console.error('Failed to fetch appointment details');
@@ -397,6 +403,56 @@ export function CloudflareRealtimeVideo({
     fetchAppointmentDetails();
     initializeSession();
   }, [fetchAppointmentDetails, initializeSession]);
+
+  // リモートストリームのトラック状態を監視
+  useEffect(() => {
+    if (remoteStream) {
+      const videoTracks = remoteStream.getVideoTracks();
+      const audioTracks = remoteStream.getAudioTracks();
+
+      // ビデオトラックの状態を監視
+      videoTracks.forEach(track => {
+        const handleTrackEnded = () => {
+          setRemoteVideoEnabled(false);
+        };
+        const handleTrackEnabled = () => {
+          setRemoteVideoEnabled(track.enabled);
+        };
+
+        track.addEventListener('ended', handleTrackEnded);
+        track.addEventListener('enabled', handleTrackEnabled);
+
+        // 初期状態を設定
+        setRemoteVideoEnabled(track.enabled);
+
+        return () => {
+          track.removeEventListener('ended', handleTrackEnded);
+          track.removeEventListener('enabled', handleTrackEnabled);
+        };
+      });
+
+      // オーディオトラックの状態を監視
+      audioTracks.forEach(track => {
+        const handleTrackEnded = () => {
+          setRemoteAudioEnabled(false);
+        };
+        const handleTrackEnabled = () => {
+          setRemoteAudioEnabled(track.enabled);
+        };
+
+        track.addEventListener('ended', handleTrackEnded);
+        track.addEventListener('enabled', handleTrackEnabled);
+
+        // 初期状態を設定
+        setRemoteAudioEnabled(track.enabled);
+
+        return () => {
+          track.removeEventListener('ended', handleTrackEnded);
+          track.removeEventListener('enabled', handleTrackEnabled);
+        };
+      });
+    }
+  }, [remoteStream]);
 
   return (
     <div className="relative h-full w-full bg-gray-900">
@@ -463,6 +519,25 @@ export function CloudflareRealtimeVideo({
               <p>相手の参加を待っています...</p>
             </div>
           )}
+          {/* リモートビデオのカメラオフ時の名前表示 */}
+          {remoteStream && !remoteVideoEnabled && appointmentDetails && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+              <div className="text-center">
+                <div className="text-4xl text-white font-bold mb-2">
+                  {userType === 'patient'
+                    ? appointmentDetails.appointment.doctor?.name || '医師'
+                    : appointmentDetails.appointment.patient.name
+                  }
+                </div>
+                <div className="text-gray-300 text-lg">
+                  {userType === 'patient' ? '医師' : '患者'}
+                </div>
+                <div className="text-gray-400 text-sm mt-2">
+                  カメラオフ
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ローカルビデオ */}
@@ -489,6 +564,9 @@ export function CloudflareRealtimeVideo({
                 </div>
                 <div className="text-gray-300 text-lg">
                   {userType === 'patient' ? '患者' : '医師'}
+                </div>
+                <div className="text-gray-400 text-sm mt-2">
+                  カメラオフ
                 </div>
               </div>
             </div>

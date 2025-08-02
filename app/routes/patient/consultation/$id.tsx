@@ -17,8 +17,47 @@ export default function PatientConsultation() {
           throw new Error('無効な診察IDです');
         }
 
-        // 認証チェック（必要に応じて）
-        // TODO: 実際の認証チェックを実装
+        console.log('🔍 患者診察室初期化:', { appointmentId: id });
+
+        // 認証トークンの確認
+        const authToken = localStorage.getItem('authToken');
+        console.log('🔑 認証トークン:', authToken ? '取得済み' : '未設定');
+
+        if (authToken) {
+          try {
+            const payload = JSON.parse(atob(authToken.split('.')[1]));
+            console.log('👤 認証情報:', {
+              id: payload.id,
+              userType: payload.userType,
+              email: payload.email
+            });
+          } catch (error) {
+            console.warn('認証トークンの解析に失敗:', error);
+          }
+        }
+
+        // 予約データの確認
+        try {
+          const response = await fetch(`/api/patient/appointments`, {
+            headers: { Authorization: `Bearer ${authToken || ''}` }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            console.log('📅 患者の予約一覧:', data.appointments);
+
+            const currentAppointment = data.appointments.find((apt: any) => apt.id.toString() === id);
+            console.log('🎯 現在の予約:', currentAppointment);
+
+            if (!currentAppointment) {
+              console.warn('⚠️ 指定された予約が見つかりません');
+            }
+          } else {
+            console.error('❌ 予約取得エラー:', response.status);
+          }
+        } catch (error) {
+          console.error('❌ 予約確認エラー:', error);
+        }
 
         setIsLoading(false);
       } catch (err) {

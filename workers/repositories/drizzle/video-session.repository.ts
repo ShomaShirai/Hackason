@@ -25,11 +25,11 @@ export class DrizzleVideoSessionRepository implements VideoSessionRepository {
     let query = this.db.select().from(videoSessions)
 
     if (options?.limit) {
-      query = query.limit(options.limit)
+      query = query.limit(options.limit) as any
     }
 
     if (options?.offset) {
-      query = query.offset(options.offset)
+      query = query.offset(options.offset) as any
     }
 
     return await query.all()

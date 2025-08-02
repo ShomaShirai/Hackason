@@ -181,6 +181,8 @@ export function EnhancedCallControls({
           )}
         </div>
 
+
+
         {/* 設定 */}
         <div className="relative z-20">
           <button

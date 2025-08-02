@@ -199,6 +199,23 @@ export class WebRTCManager {
       console.log('[Media] Requesting user media with constraints:', constraints);
       this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
+      // トラックを分離して管理
+      const audioTrack = this.localStream.getAudioTracks()[0];
+      const videoTrack = this.localStream.getVideoTracks()[0];
+
+      if (audioTrack) {
+        this.tracks.audioTrack = audioTrack;
+        this.streams.audioStream = new MediaStream([audioTrack]);
+        // 音声トラックを初期状態で無効にする
+        audioTrack.enabled = false;
+        console.log('[Media] Audio track disabled by default');
+      }
+
+      if (videoTrack) {
+        this.tracks.videoTrack = videoTrack;
+        this.streams.videoStream = new MediaStream([videoTrack]);
+      }
+
       // 取得したトラックの設定を確認
       this.localStream.getTracks().forEach(track => {
         const settings = track.getSettings();

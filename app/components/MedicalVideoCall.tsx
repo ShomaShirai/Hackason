@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
+import { getAuthToken } from '../utils/auth';
 import { CallSettingsModal } from './CallSettingsModal';
-import { DoctorChatPanel } from './chat/DoctorChatPanel';
 import { CloudflareRealtimeVideo } from './CloudflareRealtimeVideo';
 import { ConnectionErrorHandler } from './ConnectionErrorHandler';
 import { ConnectionQualityMonitor } from './ConnectionQualityMonitor';
 import { EnhancedCallControls } from './EnhancedCallControls';
 import { MedicalRecordPanel } from './MedicalRecordPanel';
 import { PatientInfoPanel } from './PatientInfoPanel';
+import { SpeechRecognition } from './SpeechRecognition';
+import { DoctorChatPanel } from './chat/DoctorChatPanel';
 
 interface MedicalVideoCallProps {
   appointmentId: string;
@@ -28,7 +30,7 @@ export function MedicalVideoCall({
   const [networkError, setNetworkError] = useState<string | null>(null);
   const [patientInfo] = useState<{ name: string } | null>(null);
   const [mediaControls, setMediaControls] = useState({
-    audio: false,
+    audio: false, // デフォルトで音声オフ
     video: false,
     screenShare: false
   });
@@ -47,6 +49,15 @@ export function MedicalVideoCall({
     enableEchoCancellation: true,
     enableNoiseReduction: true
   });
+
+  // 音声認識の状態管理（常に有効）
+  const [speechRecognitionEnabled, setSpeechRecognitionEnabled] = useState(true);
+  const [transcripts, setTranscripts] = useState<string[]>([]);
+  const [autoSaveStatus, setAutoSaveStatus] = useState({
+    isAutoSaving: false,
+    lastAutoSaved: null as Date | null
+  });
+  const [currentTranscript, setCurrentTranscript] = useState(''); // 現在の字幕データ
 
   const [videoRef, setVideoRef] = useState<{
     toggleAudio: (enabled: boolean) => void;
@@ -97,6 +108,131 @@ export function MedicalVideoCall({
 
     console.log('ビデオ切り替え:', newVideoState);
   }, [mediaControls.video, videoRef]);
+
+  // 音声認識の切り替え
+  const handleToggleSpeechRecognition = useCallback(() => {
+    setSpeechRecognitionEnabled(prev => !prev);
+  }, []);
+
+  // 文字起こし結果の処理
+  const handleTranscript = useCallback((transcript: string) => {
+    setTranscripts(prev => [...prev, transcript]);
+    setCurrentTranscript(prev => prev ? `${prev}\n${transcript}` : transcript);
+    console.log('🎤 文字起こし結果:', transcript);
+
+    // 医師の場合、音声認識結果をカルテに送信
+    if (userType === 'worker' && workerRole === 'doctor') {
+      saveTranscriptToMedicalRecord(transcript);
+    }
+  }, [userType, workerRole]);
+
+  // 音声認識結果をカルテに保存
+  const saveTranscriptToMedicalRecord = useCallback(async (transcript: string) => {
+    try {
+      // 自動保存開始状態を設定
+      setAutoSaveStatus(prev => ({ ...prev, isAutoSaving: true }));
+
+      const token = getAuthToken();
+      if (!token) {
+        console.error('認証トークンがありません');
+        return;
+      }
+
+      // 既存のカルテを取得
+      const response = await fetch(`/api/worker/medical-records/${appointmentId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json() as {
+          isNew?: boolean;
+          record?: {
+            id?: number;
+            appointmentId: number;
+            subjective: string;
+            objective: string;
+            assessment: string;
+            plan: string;
+            transcript?: string;
+            vitalSigns?: any;
+            prescriptions?: any[];
+            createdAt?: string;
+            updatedAt?: string;
+          };
+        };
+        const existingRecord = data.record;
+
+        // 既存の字幕に新しい字幕を追加
+        const currentTranscript = existingRecord?.transcript || '';
+        const updatedTranscript = currentTranscript
+          ? `${currentTranscript}\n${transcript}`
+          : transcript;
+
+        let updateResponse;
+
+        if (existingRecord && existingRecord.id) {
+          // 既存のカルテを更新
+          updateResponse = await fetch(`/api/worker/medical-records/${existingRecord.id}`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              transcript: updatedTranscript,
+              // 既存のデータも保持
+              subjective: existingRecord.subjective || '',
+              objective: existingRecord.objective || '',
+              assessment: existingRecord.assessment || '',
+              plan: existingRecord.plan || '',
+              vitalSigns: existingRecord.vitalSigns || {},
+              prescriptions: existingRecord.prescriptions || []
+            }),
+          });
+        } else {
+          // 新規カルテを作成
+          updateResponse = await fetch('/api/worker/medical-records', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              appointmentId: parseInt(appointmentId),
+              transcript: updatedTranscript,
+              subjective: '',
+              objective: '',
+              assessment: '',
+              plan: '',
+              vitalSigns: {},
+              prescriptions: []
+            }),
+          });
+        }
+
+        if (updateResponse.ok) {
+          console.log('🎤 音声認識結果をカルテに保存しました:', transcript);
+          // 自動保存完了状態を設定
+          setAutoSaveStatus({
+            isAutoSaving: false,
+            lastAutoSaved: new Date()
+          });
+        } else {
+          console.error('🎤 カルテ保存エラー:', updateResponse.status);
+          setAutoSaveStatus(prev => ({ ...prev, isAutoSaving: false }));
+        }
+      } else {
+        console.error('🎤 カルテ取得エラー:', response.status);
+        setAutoSaveStatus(prev => ({ ...prev, isAutoSaving: false }));
+      }
+    } catch (error) {
+      console.error('🎤 音声認識結果保存エラー:', error);
+      setAutoSaveStatus(prev => ({ ...prev, isAutoSaving: false }));
+    }
+  }, [appointmentId]);
 
   const handleToggleScreenShare = useCallback(async () => {
     const newScreenShareState = !mediaControls.screenShare;
@@ -277,6 +413,22 @@ export function MedicalVideoCall({
         </div>
       </div>
 
+      {/* 音声認識パネル（常に高感度表示） */}
+      <div className="fixed bottom-20 left-4 right-4 z-50">
+        <SpeechRecognition
+          isEnabled={speechRecognitionEnabled}
+          language="ja-JP"
+          onTranscript={handleTranscript}
+          className="max-w-md mx-auto"
+          maxAlternatives={25}
+          continuous={true}
+          interimResults={true}
+          highSensitivity={true}
+          noiseReduction={true}
+          adaptiveThreshold={true}
+        />
+      </div>
+
       {/* 医師用サイドパネル */}
       {userType === 'worker' && workerRole === 'doctor' && (
         <div className={`w-96 bg-gray-50 border-l border-gray-200 transition-all duration-300 ${isPanelCollapsed ? 'w-12' : 'w-96'
@@ -323,6 +475,9 @@ export function MedicalVideoCall({
                     isCollapsible={true}
                     defaultExpanded={true}
                     className="mb-4"
+                    onAutoSaveStatusChange={(status) => setAutoSaveStatus(status)}
+                    externalAutoSaveStatus={autoSaveStatus}
+                    externalTranscript={currentTranscript} // 現在の字幕データを渡す
                   />
 
                   {/* チャットパネル */}

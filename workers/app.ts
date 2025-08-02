@@ -1,6 +1,6 @@
 import { createClient } from '@libsql/client';
 import * as dotenv from 'dotenv';
-import { and, desc, eq, gte, isNotNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, isNotNull, lt, or, type SQL } from 'drizzle-orm';
 import { drizzle as drizzleD1 } from 'drizzle-orm/d1';
 import { drizzle as drizzleLibSQL } from 'drizzle-orm/libsql';
 import { Hono } from 'hono';
@@ -819,12 +819,12 @@ api.get('/patient/appointments', authMiddleware(), async (c) => {
 
     // 総数を取得（型安全なcount実装）
     const countResult = await db
-      .select({ count: sql<number>`count(*)` })
+      .select()
       .from(appointments)
       .where(whereConditions)
       .all();
 
-    const totalCount = countResult[0]?.count ?? 0;
+    const totalCount = countResult.length;
     const totalPages = Math.ceil(totalCount / limit);
 
     return c.json({
@@ -884,11 +884,7 @@ api.get('/patient/appointments/available-slots', authMiddleware(), async (c) => 
 
     // 医師のスケジュール情報を取得（簡易実装）
     const doctors = await db
-      .select({
-        id: workers.id,
-        name: workers.name,
-        role: workers.role, // TODO: 専門科を別テーブルで管理
-      })
+      .select()
       .from(workers)
       .where(eq(workers.role, 'doctor'))
       .all();
@@ -1355,6 +1351,7 @@ api.get('/worker/medical-records/:appointmentId', authMiddleware(), async (c) =>
         objective: firstRecord.medical_records.objective || '',
         assessment: firstRecord.medical_records.assessment || '',
         plan: firstRecord.medical_records.plan || '',
+        transcript: firstRecord.medical_records.transcript || '',
         vitalSigns: firstRecord.medical_records.vitalSigns ? JSON.parse(firstRecord.medical_records.vitalSigns as string) : {},
         prescriptions: prescriptionsFormatted, // 処方箋データを追加
         aiSummary: firstRecord.medical_records.aiSummary ? JSON.parse(firstRecord.medical_records.aiSummary as string) : null,
@@ -1403,6 +1400,7 @@ api.post('/worker/medical-records', authMiddleware(), async (c) => {
       objective,
       assessment,
       plan,
+      transcript,
       vitalSigns,
       prescriptions,
       aiSummary,
@@ -1438,6 +1436,7 @@ api.post('/worker/medical-records', authMiddleware(), async (c) => {
         objective: objective || null,
         assessment: assessment || null,
         plan: plan || null,
+        transcript: transcript || null,
         vitalSigns: vitalSigns ? JSON.stringify(vitalSigns) : '{}',
         prescriptions: prescriptions ? JSON.stringify(prescriptions) : '[]',
         aiSummary: aiSummary ? JSON.stringify(aiSummary) : '{}',
@@ -1476,6 +1475,7 @@ api.put('/worker/medical-records/:id', authMiddleware(), async (c) => {
       objective,
       assessment,
       plan,
+      transcript,
       vitalSigns,
       prescriptions,
       aiSummary,
@@ -1509,6 +1509,7 @@ api.put('/worker/medical-records/:id', authMiddleware(), async (c) => {
         objective: objective || existing.objective,
         assessment: assessment || existing.assessment,
         plan: plan || existing.plan,
+        transcript: transcript || existing.transcript,
         vitalSigns: vitalSigns ? JSON.stringify(vitalSigns) : existing.vitalSigns,
         prescriptions: prescriptions ? JSON.stringify(prescriptions) : existing.prescriptions,
         aiSummary: aiSummary ? JSON.stringify(aiSummary) : existing.aiSummary,
@@ -1812,10 +1813,7 @@ api.get('/worker/operator/assignment-board', authMiddleware(), async (c) => {
 
     // 待機中の患者取得
     const waitingPatientsList = await db
-      .select({
-        appointment: appointments,
-        patient: patients,
-      })
+      .select()
       .from(appointments)
       .innerJoin(patients, eq(appointments.patientId, patients.id))
       .where(
@@ -1829,10 +1827,7 @@ api.get('/worker/operator/assignment-board', authMiddleware(), async (c) => {
 
     // 割り当て済みの予約取得
     const assignedAppointments = await db
-      .select({
-        appointment: appointments,
-        patient: patients,
-      })
+      .select()
       .from(appointments)
       .innerJoin(patients, eq(appointments.patientId, patients.id))
       .where(
@@ -1857,9 +1852,9 @@ api.get('/worker/operator/assignment-board', authMiddleware(), async (c) => {
     }
 
     // 医師ごとの割り当て整理
-    const assignments = assignedAppointments.reduce((acc, { appointment, patient }) => {
-      const doctorId = appointment.assignedWorkerId!;
-      const timeSlot = new Date(appointment.scheduledAt).toLocaleTimeString('ja-JP', {
+    const assignments = assignedAppointments.reduce((acc, row) => {
+      const doctorId = row.appointments.assignedWorkerId!;
+      const timeSlot = new Date(row.appointments.scheduledAt).toLocaleTimeString('ja-JP', {
         hour: '2-digit',
         minute: '2-digit',
       });
@@ -1869,11 +1864,11 @@ api.get('/worker/operator/assignment-board', authMiddleware(), async (c) => {
       }
 
       acc[doctorId][timeSlot] = {
-        appointmentId: appointment.id,
-        patientName: patient.name,
-        chiefComplaint: appointment.chiefComplaint,
-        status: appointment.status,
-        duration: appointment.durationMinutes,
+        appointmentId: row.appointments.id,
+        patientName: row.patients.name,
+        chiefComplaint: row.appointments.chiefComplaint,
+        status: row.appointments.status,
+        duration: row.appointments.durationMinutes,
       };
 
       return acc;
@@ -1887,16 +1882,16 @@ api.get('/worker/operator/assignment-board', authMiddleware(), async (c) => {
         specialties: [], // specialtiesフィールドがないため空配列
         isActive: doctor.isActive,
       })),
-      waitingPatients: waitingPatientsList.map(({ appointment, patient }) => ({
-        appointmentId: appointment.id,
+      waitingPatients: waitingPatientsList.map((row) => ({
+        appointmentId: row.appointments.id,
         patient: {
-          id: patient.id,
-          name: patient.name,
+          id: row.patients.id,
+          name: row.patients.name,
         },
-        chiefComplaint: appointment.chiefComplaint,
-        appointmentType: appointment.appointmentType,
-        priority: appointment.priority || 'normal',
-        requestedAt: appointment.scheduledAt,
+        chiefComplaint: row.appointments.chiefComplaint,
+        appointmentType: row.appointments.appointmentType,
+        priority: 'normal',
+        requestedAt: row.appointments.scheduledAt,
       })),
       assignments,
       timeSlots,
@@ -2024,7 +2019,7 @@ api.post('/video-sessions/create', authMiddleware(), async (c) => {
       dbKeys: Object.keys(db)
     });
 
-    const videoSessionManager = new VideoSessionManager(db, callsClient);
+    const videoSessionManager = new VideoSessionManager(db as any, callsClient);
 
     // セッション作成
     try {

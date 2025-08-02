@@ -88,11 +88,13 @@ export class VideoSessionService {
       appointmentId: parseInt(appointmentId),
       realtimeSessionId,
       status: 'active',
+      startedAt: new Date(),
       endedAt: null,
       recordingUrl: null,
       participants: null,
       endReason: null,
-      sessionMetrics: null
+      sessionMetrics: null,
+      createdAt: new Date()
     };
 
     const createdSession = await videoSessionRepo.create({
@@ -104,7 +106,7 @@ export class VideoSessionService {
     const callsSession = this.callsClient ? await this.generateCallsToken(sessionId, user.id) : undefined;
 
     // 6. 予約ステータス更新
-    await appointmentRepo.update(appointmentId, { status: 'in_progress' });
+    await appointmentRepo.update(parseInt(appointmentId), { status: 'in_progress' });
 
     return {
       success: true,

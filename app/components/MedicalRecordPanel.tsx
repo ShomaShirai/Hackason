@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { getAuthToken } from '../utils/auth';
 import PrescriptionSection from './PrescriptionSection';
 
@@ -8,6 +8,9 @@ interface MedicalRecordPanelProps {
   isCollapsible?: boolean;
   defaultExpanded?: boolean;
   className?: string;
+  onAutoSaveStatusChange?: (status: { isAutoSaving: boolean; lastAutoSaved: Date | null }) => void;
+  externalAutoSaveStatus?: { isAutoSaving: boolean; lastAutoSaved: Date | null };
+  externalTranscript?: string; // 外部からの字幕データ
 }
 
 interface MedicalRecordData {
@@ -15,6 +18,7 @@ interface MedicalRecordData {
   objective: string;
   assessment: string;
   plan: string;
+  transcript?: string; // 音声認識字幕
   vitalSigns?: {
     temperature?: number;
     bloodPressure?: {
@@ -42,6 +46,8 @@ interface SaveStatus {
   isSaving: boolean;
   lastSaved: Date | null;
   hasUnsavedChanges: boolean;
+  isAutoSaving?: boolean; // 自動保存状態
+  lastAutoSaved?: Date | null; // 最後の自動保存時刻
 }
 
 export const MedicalRecordPanel = memo(function MedicalRecordPanel({
@@ -49,7 +55,10 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
   onClose,
   isCollapsible = true,
   defaultExpanded = true,
-  className = ''
+  className = '',
+  onAutoSaveStatusChange,
+  externalAutoSaveStatus,
+  externalTranscript
 }: MedicalRecordPanelProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [loading, setLoading] = useState(false);
@@ -58,7 +67,9 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({
     isSaving: false,
     lastSaved: null,
-    hasUnsavedChanges: false
+    hasUnsavedChanges: false,
+    isAutoSaving: false,
+    lastAutoSaved: null
   });
 
   const [formData, setFormData] = useState<MedicalRecordData>({
@@ -66,6 +77,7 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
     objective: '',
     assessment: '',
     plan: '',
+    transcript: '', // 音声認識字幕
     vitalSigns: {
       temperature: undefined,
       bloodPressure: {
@@ -90,6 +102,34 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
     prescriptions: false
   });
 
+  // 自動保存状態を親コンポーネントに通知
+  useEffect(() => {
+    if (onAutoSaveStatusChange) {
+      onAutoSaveStatusChange({
+        isAutoSaving: saveStatus.isAutoSaving || false,
+        lastAutoSaved: saveStatus.lastAutoSaved || null
+      });
+    }
+  }, [saveStatus.isAutoSaving, saveStatus.lastAutoSaved, onAutoSaveStatusChange]);
+
+  // 外部から自動保存状態を受け取る
+  useEffect(() => {
+    if (externalAutoSaveStatus) {
+      setSaveStatus(prev => ({
+        ...prev,
+        isAutoSaving: externalAutoSaveStatus.isAutoSaving,
+        lastAutoSaved: externalAutoSaveStatus.lastAutoSaved
+      }));
+    }
+  }, [externalAutoSaveStatus]);
+
+  // 外部から字幕データを受け取る
+  useEffect(() => {
+    if (externalTranscript) {
+      setFormData(prev => ({ ...prev, transcript: externalTranscript }));
+    }
+  }, [externalTranscript]);
+
   // 既存のカルテデータを取得
   useEffect(() => {
     fetchExistingRecord();
@@ -110,7 +150,30 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
       });
 
       if (response.ok) {
-        const data = await response.json();
+        const data = await response.json() as {
+          record?: {
+            id?: number;
+            appointmentId: number;
+            subjective: string;
+            objective: string;
+            assessment: string;
+            plan: string;
+            transcript?: string;
+            vitalSigns?: {
+              temperature?: number;
+              bloodPressure?: {
+                systolic: number;
+                diastolic: number;
+              };
+              pulse?: number;
+              respiratoryRate?: number;
+              oxygenSaturation?: number;
+            };
+            prescriptions?: PrescriptionMedication[];
+            createdAt?: string;
+            updatedAt?: string;
+          };
+        };
         setExistingRecord(data.record);
 
         // 既存データがある場合はフォームに設定
@@ -174,7 +237,23 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
         throw new Error('保存に失敗しました');
       }
 
-      const result = await response.json();
+      const result = await response.json() as {
+        success: boolean;
+        message?: string;
+        record?: {
+          id: number;
+          appointmentId: number;
+          subjective: string;
+          objective: string;
+          assessment: string;
+          plan: string;
+          transcript?: string;
+          vitalSigns?: any;
+          prescriptions?: any[];
+          createdAt: string;
+          updatedAt: string;
+        };
+      };
       if (!existingRecord) {
         setExistingRecord(result.record);
       }
@@ -246,13 +325,13 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
   };
 
   const formatLastSaved = (date: Date | null) => {
-    if (!date) {return '';}
+    if (!date) { return ''; }
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const minutes = Math.floor(diff / 60000);
 
-    if (minutes < 1) {return '今保存しました';}
-    if (minutes < 60) {return `${minutes}分前に保存`;}
+    if (minutes < 1) { return '今保存しました'; }
+    if (minutes < 60) { return `${minutes}分前に保存`; }
     return date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
   };
 
@@ -408,6 +487,47 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
                     rows={3}
                     placeholder="治療方針、処方、フォローアップなど..."
                   />
+                </div>
+
+                {/* 音声認識字幕 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    🎤 音声認識字幕
+                  </label>
+                  <div className="relative">
+                    <textarea
+                      value={formData.transcript || ''}
+                      onChange={(e) => handleInputChange('transcript', e.target.value)}
+                      className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-blue-50"
+                      rows={4}
+                      placeholder="音声認識で生成された字幕がここに表示されます..."
+                      readOnly={!!externalTranscript} // 外部字幕がある場合は読み取り専用
+                    />
+                    {/* リアルタイム保存状態インジケーター */}
+                    <div className="absolute top-2 right-2 flex items-center gap-2">
+                      {saveStatus.isAutoSaving && (
+                        <div className="flex items-center gap-1 text-blue-600 text-xs">
+                          <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                          <span>自動保存中...</span>
+                        </div>
+                      )}
+                      {saveStatus.lastAutoSaved && !saveStatus.isAutoSaving && (
+                        <div className="text-green-600 text-xs">
+                          ✓ 自動保存済み
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between mt-1">
+                    <p className="text-xs text-gray-500">
+                      診察中の音声認識結果が自動的に保存されます
+                    </p>
+                    {saveStatus.lastAutoSaved && (
+                      <p className="text-xs text-gray-400">
+                        最終更新: {formatLastSaved(saveStatus.lastAutoSaved)}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

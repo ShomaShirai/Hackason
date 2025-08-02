@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import { z } from 'zod';
 
 // Zodスキーマ定義
@@ -181,6 +181,7 @@ export const medicalRecords = sqliteTable('medical_records', {
   objective: text('objective'), // O: 客観的所見
   assessment: text('assessment'), // A: 評価
   plan: text('plan'), // P: 計画
+  transcript: text('transcript'), // 音声認識字幕
   vitalSigns: text('vital_signs').default('{}'),
   // JSON形式: { temperature, bloodPressure: {systolic, diastolic}, pulse, respiratoryRate, oxygenSaturation }
   prescriptions: text('prescriptions', { mode: 'json' }).default('[]'),

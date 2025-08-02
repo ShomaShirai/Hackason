@@ -1,14 +1,15 @@
-import { drizzle } from 'drizzle-orm/libsql';
 import { createClient } from '@libsql/client';
 import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/libsql';
 import { hashPasswordSync } from './auth/password';
 import {
-  patients,
-  workers,
-  specialties,
-  qualifications,
+  appointments,
+  doctorQualifications,
   doctorSpecialties,
-  doctorQualifications
+  patients,
+  qualifications,
+  specialties,
+  workers
 } from './db/schema';
 
 const client = createClient({
@@ -269,6 +270,53 @@ async function seedData() {
       }).onConflictDoNothing();
     }
 
+    // 予約データの挿入
+    console.log('予約データを挿入中...');
+    const [patient1] = await db.select().from(patients).where(eq(patients.email, 'patient@test.com'));
+    const [doctorTanakaForAppointment] = await db.select().from(workers).where(eq(workers.email, 'doctor@test.com'));
+
+    if (patient1 && doctorTanakaForAppointment) {
+      const appointmentData = [
+        {
+          patientId: patient1.id,
+          assignedWorkerId: doctorTanakaForAppointment.id,
+          scheduledAt: new Date(), // 今日
+          status: 'scheduled' as const,
+          appointmentType: 'initial' as const,
+          chiefComplaint: '頭痛とめまいが続いています',
+          durationMinutes: 30,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          patientId: patient1.id,
+          assignedWorkerId: doctorTanakaForAppointment.id,
+          scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 明日
+          status: 'scheduled' as const,
+          appointmentType: 'initial' as const,
+          chiefComplaint: '発熱と咳が続いています',
+          durationMinutes: 30,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          patientId: patient1.id,
+          assignedWorkerId: doctorTanakaForAppointment.id,
+          scheduledAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), // 明後日
+          status: 'scheduled' as const,
+          appointmentType: 'followup' as const,
+          chiefComplaint: '前回の処方薬の効果確認',
+          durationMinutes: 20,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+      ];
+
+      for (const appointment of appointmentData) {
+        await db.insert(appointments).values(appointment).onConflictDoNothing();
+      }
+    }
+
     console.log('✅ テストデータの挿入が完了しました！');
 
     // 挿入されたデータの確認
@@ -276,11 +324,13 @@ async function seedData() {
     const workerCount = await db.select().from(workers);
     const specialtyCount = await db.select().from(specialties);
     const qualificationCount = await db.select().from(qualifications);
+    const appointmentCount = await db.select().from(appointments);
 
     console.log(`📊 患者数: ${patientCount.length}`);
     console.log(`📊 医療従事者数: ${workerCount.length}`);
     console.log(`📊 専門科数: ${specialtyCount.length}`);
     console.log(`📊 資格数: ${qualificationCount.length}`);
+    console.log(`📊 予約数: ${appointmentCount.length}`);
   } catch (error) {
     console.error('❌ テストデータの挿入中にエラーが発生しました:', error);
   } finally {
