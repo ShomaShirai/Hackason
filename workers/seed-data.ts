@@ -12,7 +12,7 @@ import {
 } from './db/schema';
 
 const client = createClient({
-  url: 'file:.wrangler/state/v3/d1/miniflare-D1DatabaseObject/4e06e3b92174d6a1eb1962c54bba2bc97a274b2b3378ad576b6b409e387e5b38.sqlite',
+  url: 'file:.wrangler/state/v3/d1/miniflare-D1DatabaseObject/63a21fc2ced579087d11fa52d85ecd915d367073facc42cf86ca0c03c2b041ea.sqlite',
 });
 
 const db = drizzle(client);
