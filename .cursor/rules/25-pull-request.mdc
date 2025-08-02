@@ -1,0 +1,47 @@
+---
+description: PR|PullRequestを作成する時|/pr
+globs: 
+alwaysApply: false
+---
+# Pull Request作成時のIssue関連付けルール
+
+## 基本方針
+Pull Request作成時は必ずIssueを関連付けること。
+
+## 重要
+
+PRを出す前に以下を確認
+- 既存のテストが全て通っている
+- Lintがパスしていること
+
+## Issue関連付け方法
+
+### コミットメッセージ
+```bash
+git commit -m "feat: 機能実装
+
+Closes #<issue_number>"
+```
+
+### PR本文（必須）
+```markdown
+# 機能名 - 概要
+
+Closes #<issue_number>
+
+## 実装内容
+- 主な変更点
+
+## 動作確認
+- テスト結果
+```
+
+## キーワード
+- `Closes #<number>` - Issue完了（推奨）
+- `Fixes #<number>` - バグ修正
+- `Related to #<number>` - 関連のみ
+
+## 注意事項
+- Issue番号必須
+- 完了時は`Closes`使用
+- 複数対応可能: `Fixes #12, Closes #15`

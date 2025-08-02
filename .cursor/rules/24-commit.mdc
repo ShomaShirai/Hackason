@@ -1,0 +1,47 @@
+---
+description: /commit
+globs:
+alwaysApply: false
+---
+
+# コミット前手順
+
+## 1. 秘密情報チェック
+
+API_KEY や パスワード など 秘密情報が含まれていたら教えて
+
+## 2. コード品質チェック（Lint・Type Check）
+
+### メインプロジェクト（React-Router-Hono統合）
+
+
+### フロントエンド（Next.js）- 必要に応じて
+
+```bash
+cd frontend
+npm run lint:fix
+```
+
+### バックエンド（Hono）- 必要に応じて
+
+```bash
+cd backend-hono
+npm run lint:fix
+```
+
+## 3. コミット実行
+
+上記のチェックで問題がなければコミットを実行
+
+### 推奨コミット手順
+
+1. `npm run lint:fix` でlintを実行
+2. 秘密情報チェック
+3. `git add .` でステージング
+4. `git commit -m "適切なコミットメッセージ"`
+
+### 注意事項
+
+- TypeScriptエラーが3回以上続く場合は修正方針を確認
+- better-sqlite3のCloudflare Workers環境エラーは既知の問題（モック版で回避済み）
+- 実際のD1データベース接続実装時には追加の設定が必要

@@ -1,0 +1,40 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+dist
+build
+.next
+out
+
+# Logs
+*.log
+
+# Misc
+.DS_Store
+.env*
+!.env.example
+
+# IDE
+.vscode
+.idea
+
+# Certificates
+*.pem
+
+# Database
+*.db
+*.sqlite
+drizzle
+
+# Generated files
+worker-configuration.d.ts
+
+# Test coverage
+coverage
+.nyc_output
+
+# Temporary files
+tmp
+temp

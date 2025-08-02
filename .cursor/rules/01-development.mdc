@@ -1,0 +1,257 @@
+---
+description: 開発標準・品質保証ルール - Context7活用・Playwright自動テスト・Lint実行
+globs:
+alwaysApply: true
+---
+
+# 開発標準・品質保証ルール
+
+## Context7活用による最新技術学習
+
+### 基本方針
+
+- **技術判断前のContext7調査**: 新しいライブラリ・フレームワークを使用する前に必ずContext7で最新のベストプラクティスを確認
+- **実装パターンの学習**: 公式ドキュメントだけでなく、Context7で実際の使用例・パターンを学習してから実装
+
+### 活用手順
+
+1. **ライブラリID解決**: `resolve-library-id`で正確なライブラリIDを取得
+2. **特定トピック調査**: `get-library-docs`で`topic`パラメータを使用して具体的な実装方法を調査
+3. **実装前検証**: Context7で得た情報を基に実装方針を決定
+
+### 実例（Hono認証システム実装）
+
+```typescript
+// Context7で学習したHonoの認証パターン
+import { createMiddleware } from 'hono/factory'
+import type { Context, Next } from 'hono'
+
+// 型安全なミドルウェア実装
+const authMiddleware = createMiddleware<{
+  Variables: { user: JWTPayload }
+}>(async (c, next) => {
+  // Context7から学んだベストプラクティスを適用
+  const token = extractTokenFromHeader(c.req.header('Authorization'))
+  // ...
+})
+```
+
+## Playwright自動化による動作確認
+
+### 開発時の必須確認項目
+
+- **ログイン機能**: 患者・医療従事者双方のログインフロー
+- **ダッシュボード表示**: ユーザータイプ別の正常な画面遷移
+- **API連携**: フロントエンド・バックエンド間の正常な通信
+
+### Playwrightテスト実行手順
+
+1. **開発サーバー起動確認**
+
+   ```bash
+   # ターミナル1: 開発サーバー
+   npm run dev
+   # → localhost:8787でサーバーが起動
+
+   # ターミナル2: ビルド監視（別ターミナルで実行）
+   npm run watch-build
+   # → 修正が約10秒でhot-reload
+   ```
+
+2. **ブラウザテスト実行**
+   - ログインページアクセス (`/login`)
+   - 認証情報入力・送信
+   - ダッシュボード画面の表示確認
+   - ログアウト機能の動作確認
+
+3. **テスト観点**
+   - **UI/UX**: 直感的な操作フロー
+   - **認証**: JWT token正常生成・検証
+   - **ルーティング**: ロールベースの画面遷移
+   - **エラーハンドリング**: 不正な認証情報での適切なエラー表示
+
+### 実装例
+
+```typescript
+// Playwrightテストでの実際の確認コード
+await page.goto('http://localhost:5173/login');
+await page.getByRole('button', { name: '👤 患者' }).click();
+await page.getByRole('textbox', { name: 'メールアドレス' }).fill('patient@test.com');
+await page.getByRole('textbox', { name: 'パスワード' }).fill('test123');
+await page.getByRole('button', { name: 'ログイン' }).click();
+
+// ダッシュボード遷移の確認
+expect(page.url()).toContain('/patient/dashboard');
+expect(page.getByText('山田太郎さん')).toBeVisible();
+```
+
+## Lint・型チェック実行
+
+### コミット前必須チェック
+
+```bash
+
+# Lint実行（コミット前必須）
+npm run lint:fix
+
+# コードフォーマット（必要に応じて）
+npm run format
+
+# 成功例の出力確認
+✨ Types written to worker-configuration.d.ts
+# → エラーがないことを確認してからコミット
+```
+
+## テスト実行
+
+### テストディレクトリ構成
+
+```text
+workers/__tests__/     # APIテスト
+├── patient/          # 患者向けAPIテスト
+└── worker/           # 医療従事者向けAPIテスト
+    └── doctor/       # 医師向けAPIテスト
+```
+
+### テスト実行コマンド
+
+```bash
+# 全テスト実行
+npm test
+
+# 特定ファイルのテスト実行
+npm test workers/__tests__/worker/doctor/schedule.test.ts
+
+# ウォッチモードでテスト実行
+npm test -- --watch
+```
+
+### 自動化されたチェック項目
+
+1. **TypeScript型チェック**: `tsc -b`
+2. **Cloudflare Workers型生成**: `wrangler types`
+3. **React Router型生成**: `react-router typegen`
+
+### エラー対応指針
+
+- **型エラー**: Context7で調査したパターンに基づいて修正
+- **import/export問題**: `type` keyword使用で型のみインポート
+- **環境固有エラー**: Cloudflare Workers対応（`nodejs_compat`等）
+
+### 品質保証のワークフロー
+
+```bash
+# 開発中の継続的確認（2ターミナル推奨）
+# ターミナル1:
+npm run dev        # 開発サーバー起動
+# ターミナル2:
+npm run watch-build # ビルド監視（約10秒でhot-reload）
+# → Playwrightでブラウザテスト
+
+# コミット前の品質チェック
+npm run lint:fix  # Lintエラーチェック
+git add .          # ステージング
+git commit -m "..."# コミット実行
+```
+
+## 技術選択の指針
+
+### Context7優先の技術判断
+
+- **新機能実装前**: 必ずContext7で最新のベストプラクティス確認
+- **ライブラリ選定**: 公式ドキュメント + Context7での実用例確認
+- **アーキテクチャ決定**: Context7で成功事例・失敗事例を調査
+
+### 実装品質の確保
+
+- **型安全性**: TypeScript + Drizzle ORM + Zod で完全な型チェーン
+- **テスト駆動**: Playwright自動化で継続的な動作確認
+- **品質チェック徹底**: 実装後は必ず `npm run lint` を実行
+- **Context7活用**: ライブラリ使用時は必ず最新ドキュメント・ベストプラクティスを確認
+
+## 重要な設計ドキュメント
+
+### データベース設計
+
+- **設計書**: `docs/api/database-design.md`
+- **内容**: テーブル定義、ER図、インデックス設計、型定義
+- **参照時**: 新規テーブル追加、既存テーブル変更、リレーション確認時に必ず参照
+- **継続的改善**: Context7で新しいパターン発見時の積極的なリファクタリング
+
+## ハッカソン参加者向けガイドライン
+
+### 推奨開発フロー
+
+1. **要件定義**: Context7で技術調査・パターン学習
+2. **実装**: 学習したベストプラクティス適用
+3. **テスト**: Playwright自動化で動作確認
+4. **品質確保**: lint・型チェック実行
+5. **コミット**: 段階的なコミットで変更履歴管理
+
+## キリの良いところでのコミット
+
+### コミットタイミングの指針
+
+- **機能単位**: 1つの機能が完成したタイミング
+- **テスト通過後**: Playwright・lint・型チェックが全て成功
+- **動作確認済み**: ブラウザでの実際の動作を確認済み
+- **差分が適切**: 変更量が管理しやすい範囲（通常100-300行程度）
+
+### 良いコミット例
+
+```bash
+# ✅ 機能完成・テスト済み
+git commit -m "feat: JWT認証システム統合とPlaywrightテスト実装
+
+- JWT認証システムをメインアプリケーション（workers/app.ts）に統合
+- 患者・医療従事者ログイン機能の実装完了
+- Playwrightでログイン機能の動作確認（患者・医師両方のダッシュボード表示）
+- Cloudflare Workers nodejs_compat設定追加でbcryptjs対応"
+```
+
+### 避けるべきコミット
+
+- **中途半端な状態**: 実装途中でコンパイルエラーがある
+- **テスト未実行**: 動作確認をしていない変更
+- **巨大すぎる差分**: 複数機能が混在した大量変更
+- **壊れた状態**: lint・型チェックでエラーが残存
+
+### コミット前チェックリスト
+
+```bash
+
+# 1. Lint実行
+npm run lint
+
+# 2. 開発サーバー正常起動確認
+npm run dev
+
+# 3. Playwrightテスト実行（必要に応じて）
+# ブラウザで重要機能の動作確認
+
+# 4. 変更内容確認
+git diff
+
+# 5. 秘密情報チェック
+# API_KEY、パスワード、個人情報が含まれていないか
+
+# 6. コミット実行
+git add .
+git commit -m "適切なコミットメッセージ"
+```
+
+### 段階的コミット戦略
+
+1. **基盤実装**: データベース設定、スキーマ定義
+2. **認証システム**: JWT、パスワードハッシュ、セッション管理
+3. **API実装**: エンドポイント作成、テストデータ確認
+4. **フロントエンド統合**: ログイン画面、ダッシュボード
+5. **テスト・品質確保**: Playwright確認、lint修正
+6. **設定・環境**: Cloudflare設定、環境変数管理
+
+### 学習・成長の観点
+
+- **技術力向上**: Context7による最新情報学習
+- **実践経験**: Playwrightによる実際のユーザー操作確認
+- **品質意識**: lint・型チェックによる堅牢なコード作成
+- **プロジェクト管理**: 適切なコミット履歴による開発プロセスの可視化

@@ -1,0 +1,12 @@
+# テスト用JSファイル
+test-simple.js
+test-video-call.js
+
+# ビルド・設定ファイル
+dist/
+node_modules/
+.next/
+.wrangler/
+
+# ログファイル
+*.log

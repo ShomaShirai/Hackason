@@ -1,0 +1,2461 @@
+openapi: 3.0.3
+info:
+  title: オンライン診療システム API
+  description: |
+    ファストドクター主催「オンライン診療AI活用ハッカソン」のベースシステムAPI仕様書です。
+    患者と医療従事者（医師・オペレータ・管理者）の両方に対応したRESTful APIを提供します。
+  version: 1.0.0
+  contact:
+    name: ハッカソンサポートチーム
+    email: hackathon@fastdoctor.jp
+
+servers:
+  - url: http://localhost:8787
+    description: ローカル開発環境
+  - url: https://api.online-medical.example.com
+    description: 本番環境（Cloudflare Workers）
+
+tags:
+  - name: Auth
+    description: 認証関連のAPI
+  - name: Common
+    description: 共通API（ファイルアップロード、WebSocket接続など）
+  - name: Patient
+    description: 患者向けAPI
+  - name: Worker
+    description: 医療従事者向けAPI
+  - name: Admin
+    description: 管理者向けAPI
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT認証トークン
+
+  schemas:
+    # 共通スキーマ
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: エラーコード
+        message:
+          type: string
+          description: エラーメッセージ
+        details:
+          type: object
+          description: 詳細なエラー情報
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: 総件数
+        page:
+          type: integer
+          description: 現在のページ番号
+        limit:
+          type: integer
+          description: 1ページあたりの件数
+        hasNext:
+          type: boolean
+          description: 次のページが存在するか
+        hasPrev:
+          type: boolean
+          description: 前のページが存在するか
+
+    # ユーザー関連
+    WorkerRole:
+      type: string
+      enum: [doctor, operator, admin]
+      description: 医療従事者ロール
+
+    Patient:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        phoneNumber:
+          type: string
+        dateOfBirth:
+          type: string
+          format: date
+        gender:
+          type: string
+          enum: [male, female, other]
+        address:
+          type: string
+        emergencyContact:
+          type: string
+        medicalHistory:
+          type: array
+          items:
+            type: object
+            properties:
+              condition:
+                type: string
+              diagnosedDate:
+                type: string
+                format: date
+              notes:
+                type: string
+        profileImageUrl:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Worker:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/WorkerRole'
+        phoneNumber:
+          type: string
+        medicalLicenseNumber:
+          type: string
+        profileImageUrl:
+          type: string
+        isActive:
+          type: boolean
+        specialties:
+          type: array
+          items:
+            $ref: '#/components/schemas/Specialty'
+        qualifications:
+          type: array
+          items:
+            $ref: '#/components/schemas/Qualification'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Specialty:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        isPrimary:
+          type: boolean
+          description: 主専門科かどうか（doctor_specialties経由）
+
+    Qualification:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        displayName:
+          type: string
+        category:
+          type: string
+          enum: [specialist, certified, instructor, subspecialty, designated]
+        certificateNumber:
+          type: string
+          description: 資格証番号（doctor_qualifications経由）
+        acquiredDate:
+          type: string
+          format: date
+          description: 取得日（doctor_qualifications経由）
+        expiryDate:
+          type: string
+          format: date
+          description: 有効期限（doctor_qualifications経由）
+
+    # 予約関連
+    AppointmentStatus:
+      type: string
+      enum: [scheduled, waiting, assigned, in_progress, completed, cancelled]
+      description: 予約ステータス
+
+    AppointmentType:
+      type: string
+      enum: [initial, follow_up, emergency]
+      description: 診察種別
+
+    Appointment:
+      type: object
+      properties:
+        id:
+          type: integer
+        patientId:
+          type: integer
+        patient:
+          $ref: '#/components/schemas/Patient'
+        workerId:
+          type: integer
+        worker:
+          $ref: '#/components/schemas/Worker'
+        scheduledAt:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/AppointmentStatus'
+        chiefComplaint:
+          type: string
+          description: 主訴
+        meetingId:
+          type: string
+          description: Chime Meeting ID
+        appointmentType:
+          $ref: '#/components/schemas/AppointmentType'
+        durationMinutes:
+          type: integer
+          default: 30
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    # 問診票関連
+    QuestionnaireQuestion:
+      type: object
+      properties:
+        id:
+          type: string
+        question:
+          type: string
+        answer:
+          type: string
+        category:
+          type: string
+          enum: [symptom, medical_history, lifestyle, allergy, medication]
+
+    Questionnaire:
+      type: object
+      properties:
+        id:
+          type: integer
+        appointmentId:
+          type: integer
+        questionsAnswers:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuestionnaireQuestion'
+        aiSummary:
+          type: string
+          description: AI生成サマリー
+        urgencyLevel:
+          type: string
+          enum: [low, medium, high, critical]
+        completedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    # 診察記録関連
+    VitalSigns:
+      type: object
+      properties:
+        bloodPressure:
+          type: object
+          properties:
+            systolic:
+              type: integer
+            diastolic:
+              type: integer
+        temperature:
+          type: number
+        pulse:
+          type: integer
+        respiratoryRate:
+          type: integer
+        oxygenSaturation:
+          type: integer
+          description: SpO2 (血中酸素飽和度)
+
+    MedicalRecord:
+      type: object
+      properties:
+        id:
+          type: integer
+        appointmentId:
+          type: integer
+        subjective:
+          type: string
+          description: S - 主観的情報
+        objective:
+          type: string
+          description: O - 客観的情報
+        assessment:
+          type: string
+          description: A - 評価
+        plan:
+          type: string
+          description: P - 計画
+        vitalSigns:
+          $ref: '#/components/schemas/VitalSigns'
+        aiSummary:
+          type: object
+          properties:
+            summary:
+              type: string
+            keyPoints:
+              type: array
+              items:
+                type: string
+            followUpNeeded:
+              type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    # 処方箋関連
+    Medication:
+      type: object
+      properties:
+        name:
+          type: string
+        dosage:
+          type: string
+        frequency:
+          type: string
+        duration:
+          type: string
+        instructions:
+          type: string
+
+    Prescription:
+      type: object
+      properties:
+        id:
+          type: integer
+        appointmentId:
+          type: integer
+        workerId:
+          type: integer
+        medications:
+          type: array
+          items:
+            $ref: '#/components/schemas/Medication'
+        pharmacyNotes:
+          type: string
+        status:
+          type: string
+          enum: [draft, issued, dispensed, cancelled]
+        issuedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    # チャット関連
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        appointmentId:
+          type: integer
+        patientId:
+          type: integer
+        workerId:
+          type: integer
+        messageType:
+          type: string
+          enum: [text, image, file, system]
+        content:
+          type: string
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
+        sentAt:
+          type: string
+          format: date-time
+        readAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    # ファイル関連
+    Attachment:
+      type: object
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        contentType:
+          type: string
+        size:
+          type: integer
+        url:
+          type: string
+        thumbnailUrl:
+          type: string
+        metadata:
+          type: object
+          properties:
+            width:
+              type: integer
+            height:
+              type: integer
+            duration:
+              type: integer
+              description: 動画・音声の長さ（秒）
+        createdAt:
+          type: string
+          format: date-time
+
+    # ビデオ通話関連
+    VideoToken:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Chime SDK参加用トークン
+        meetingId:
+          type: string
+        attendeeId:
+          type: string
+        joinUrl:
+          type: string
+          description: ワンクリック参加URL
+        expiresAt:
+          type: string
+          format: date-time
+
+    # 健康記録関連
+    HealthRecord:
+      type: object
+      properties:
+        id:
+          type: integer
+        patientId:
+          type: integer
+        recordType:
+          type: string
+          enum: [blood_pressure, blood_sugar, weight, temperature, symptom, medication]
+        value:
+          type: object
+          description: 記録値（型は recordType による）
+        recordedAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    # スケジュール関連
+    WorkerSchedule:
+      type: object
+      properties:
+        id:
+          type: integer
+        workerId:
+          type: integer
+        scheduleDate:
+          type: string
+          format: date
+        startTime:
+          type: string
+          format: time
+        endTime:
+          type: string
+          format: time
+        status:
+          type: string
+          enum: [available, busy, off]
+        maxAppointments:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    # 統計情報
+    DashboardStats:
+      type: object
+      properties:
+        todayAppointments:
+          type: integer
+        completedAppointments:
+          type: integer
+        pendingAppointments:
+          type: integer
+        totalPatients:
+          type: integer
+        newPatientsThisMonth:
+          type: integer
+        averageConsultationTime:
+          type: integer
+          description: 平均診察時間（分）
+
+  responses:
+    UnauthorizedError:
+      description: 認証エラー
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: UNAUTHORIZED
+            message: 認証が必要です
+
+    ForbiddenError:
+      description: 権限エラー
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: FORBIDDEN
+            message: このリソースへのアクセス権限がありません
+
+    NotFoundError:
+      description: リソースが見つからない
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: NOT_FOUND
+            message: 指定されたリソースが見つかりません
+
+    ValidationError:
+      description: バリデーションエラー
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: VALIDATION_ERROR
+            message: 入力値が不正です
+            details:
+              field: email
+              reason: 有効なメールアドレスではありません
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ==================== 認証API ====================
+  /auth/patient/login:
+    post:
+      tags:
+        - Auth
+      summary: 患者ログイン
+      description: 患者用ログインエンドポイント。メールアドレスとパスワードでログインし、JWTトークンを取得します
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: ログイン成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: JWTアクセストークン
+                  refreshToken:
+                    type: string
+                    description: リフレッシュトークン
+                  user:
+                    $ref: '#/components/schemas/Patient'
+                  expiresIn:
+                    type: integer
+                    description: トークン有効期限（秒）
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /auth/worker/login:
+    post:
+      tags:
+        - Auth
+      summary: 医療従事者ログイン
+      description: 医療従事者（医師・オペレータ・管理者）用ログインエンドポイント。メールアドレスとパスワードでログインし、JWTトークンを取得します
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: ログイン成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: JWTアクセストークン
+                  refreshToken:
+                    type: string
+                    description: リフレッシュトークン
+                  user:
+                    $ref: '#/components/schemas/Worker'
+                  expiresIn:
+                    type: integer
+                    description: トークン有効期限（秒）
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /auth/logout:
+    post:
+      tags:
+        - Auth
+      summary: ログアウト
+      description: 現在のセッションを終了します
+      responses:
+        '200':
+          description: ログアウト成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: ログアウトしました
+
+  /auth/refresh:
+    post:
+      tags:
+        - Auth
+      summary: トークンリフレッシュ
+      description: リフレッシュトークンを使用して新しいアクセストークンを取得します
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        '200':
+          description: トークン更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: 新しいJWTアクセストークン
+                  expiresIn:
+                    type: integer
+                    description: トークン有効期限（秒）
+
+  # ==================== 共通API ====================
+  /health:
+    get:
+      tags:
+        - Common
+      summary: ヘルスチェック
+      description: APIサーバーの稼働状態を確認します
+      security: []
+      responses:
+        '200':
+          description: サーバー正常稼働中
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  timestamp:
+                    type: string
+                    format: date-time
+                  version:
+                    type: string
+                    example: 1.0.0
+
+  /api/attachments:
+    post:
+      tags:
+        - Common
+      summary: ファイルアップロード
+      description: 画像、PDF、音声、動画などのファイルをアップロードします
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: アップロードするファイル
+                context:
+                  type: string
+                  enum: [questionnaire, medical_record, chat, prescription]
+                  description: ファイルの使用コンテキスト
+      responses:
+        '201':
+          description: アップロード成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attachment'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /ws/connect:
+    get:
+      tags:
+        - Common
+      summary: WebSocket接続
+      description: リアルタイムメッセージング用のWebSocket接続を確立します
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 認証トークン
+      responses:
+        '101':
+          description: WebSocketアップグレード成功
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  # ==================== 患者向けAPI ====================
+  /api/patient/profile:
+    get:
+      tags:
+        - Patient
+      summary: プロフィール取得
+      description: ログイン中の患者の自分のプロフィール情報を取得します
+      responses:
+        '200':
+          description: プロフィール取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Patient'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+    put:
+      tags:
+        - Patient
+      summary: プロフィール更新
+      description: 自分のプロフィール情報を更新します
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                phoneNumber:
+                  type: string
+                address:
+                  type: string
+                emergencyContact:
+                  type: string
+                medicalHistory:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      condition:
+                        type: string
+                      diagnosedDate:
+                        type: string
+                        format: date
+                      notes:
+                        type: string
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Patient'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/patient/profile/avatar:
+    post:
+      tags:
+        - Patient
+      summary: アバター画像アップロード
+      description: プロフィール用のアバター画像をアップロードします
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - avatar
+              properties:
+                avatar:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: アップロード成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profileImageUrl:
+                    type: string
+
+  /api/patient/appointments:
+    get:
+      tags:
+        - Patient
+      summary: 予約一覧取得
+      description: 自分の予約一覧を取得します
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/AppointmentStatus'
+          description: ステータスでフィルタ
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Appointment'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+    post:
+      tags:
+        - Patient
+      summary: 新規予約作成
+      description: 新しい診察予約を作成します
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - scheduledAt
+                - chiefComplaint
+                - appointmentType
+              properties:
+                scheduledAt:
+                  type: string
+                  format: date-time
+                chiefComplaint:
+                  type: string
+                  description: 主訴
+                appointmentType:
+                  $ref: '#/components/schemas/AppointmentType'
+                durationMinutes:
+                  type: integer
+                  default: 30
+      responses:
+        '201':
+          description: 予約作成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/patient/appointments/{id}:
+    get:
+      tags:
+        - Patient
+      summary: 予約詳細取得
+      description: 指定した予約の詳細情報を取得します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    put:
+      tags:
+        - Patient
+      summary: 予約変更
+      description: 予約日時や主訴を変更します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scheduledAt:
+                  type: string
+                  format: date-time
+                chiefComplaint:
+                  type: string
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags:
+        - Patient
+      summary: 予約キャンセル
+      description: 予約をキャンセルします
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: キャンセル成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: 予約をキャンセルしました
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/patient/questionnaires/{appointmentId}:
+    get:
+      tags:
+        - Patient
+      summary: 問診票取得
+      description: 指定した予約の問診票を取得します
+      parameters:
+        - name: appointmentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Questionnaire'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/patient/questionnaires:
+    post:
+      tags:
+        - Patient
+      summary: 問診票提出
+      description: 新規問診票を提出します
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - appointmentId
+                - questionsAnswers
+              properties:
+                appointmentId:
+                  type: integer
+                questionsAnswers:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/QuestionnaireQuestion'
+      responses:
+        '201':
+          description: 提出成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Questionnaire'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/patient/questionnaires/{id}:
+    put:
+      tags:
+        - Patient
+      summary: 問診票更新
+      description: 提出済み問診票を更新します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                questionsAnswers:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/QuestionnaireQuestion'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Questionnaire'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/patient/prescriptions:
+    get:
+      tags:
+        - Patient
+      summary: 処方箋一覧
+      description: 自分の処方箋一覧を取得します
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [issued, dispensed]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Prescription'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /api/patient/appointments/{id}/chat:
+    get:
+      tags:
+        - Patient
+      summary: チャットメッセージ取得
+      description: 指定した予約のチャットメッセージを取得します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: lastMessageId
+          in: query
+          schema:
+            type: integer
+          description: このID以降のメッセージを取得
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatMessage'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    post:
+      tags:
+        - Patient
+      summary: メッセージ送信
+      description: チャットメッセージを送信します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - content
+              properties:
+                content:
+                  type: string
+                attachmentIds:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '201':
+          description: 送信成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/patient/appointments/{id}/video-token:
+    get:
+      tags:
+        - Patient
+      summary: ビデオ通話トークン取得
+      description: ビデオ通話に参加するためのトークンを取得します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoToken'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/patient/health-records:
+    get:
+      tags:
+        - Patient
+      summary: 健康記録一覧
+      description: 自分の健康記録一覧を取得します
+      parameters:
+        - name: recordType
+          in: query
+          schema:
+            type: string
+            enum: [blood_pressure, blood_sugar, weight, temperature, symptom, medication]
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HealthRecord'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+    post:
+      tags:
+        - Patient
+      summary: 健康記録登録
+      description: 新しい健康記録を登録します
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - recordType
+                - value
+                - recordedAt
+              properties:
+                recordType:
+                  type: string
+                  enum: [blood_pressure, blood_sugar, weight, temperature, symptom, medication]
+                value:
+                  type: object
+                  description: |
+                    記録値。recordTypeによって形式が異なります：
+                    - blood_pressure: { systolic: number, diastolic: number }
+                    - blood_sugar: { value: number, timing: string }
+                    - weight: { value: number }
+                    - temperature: { value: number }
+                    - symptom: { symptom: string, severity: string }
+                    - medication: { name: string, dosage: string, time: string }
+                recordedAt:
+                  type: string
+                  format: date-time
+                notes:
+                  type: string
+      responses:
+        '201':
+          description: 登録成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthRecord'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  # ==================== 医療従事者向けAPI ====================
+  /api/worker/dashboard/stats:
+    get:
+      tags:
+        - Worker
+      summary: 統計情報取得
+      description: ダッシュボード用の統計情報を取得します
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStats'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/worker/dashboard/today:
+    get:
+      tags:
+        - Worker
+      summary: 本日の予約一覧
+      description: 本日の予約一覧を取得します
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  appointments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Appointment'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/worker/patients:
+    get:
+      tags:
+        - Worker
+      summary: 患者一覧取得
+      description: 患者一覧を取得します
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: 名前・メールアドレス・電話番号で検索
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Patient'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/worker/patients/{id}:
+    get:
+      tags:
+        - Worker
+      summary: 患者詳細取得
+      description: 指定した患者の詳細情報を取得します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Patient'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    put:
+      tags:
+        - Worker
+      summary: 患者情報更新
+      description: 患者情報を更新します（管理者のみ）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                phoneNumber:
+                  type: string
+                address:
+                  type: string
+                emergencyContact:
+                  type: string
+                medicalHistory:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Patient'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/worker/patients/{id}/history:
+    get:
+      tags:
+        - Worker
+      summary: 患者の診察履歴
+      description: 指定した患者の診察履歴を取得します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  appointments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Appointment'
+                  medicalRecords:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MedicalRecord'
+                  prescriptions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Prescription'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/worker/appointments:
+    get:
+      tags:
+        - Worker
+      summary: 全予約一覧
+      description: 全ての予約一覧を取得します
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/AppointmentStatus'
+        - name: workerId
+          in: query
+          schema:
+            type: integer
+          description: 担当医師でフィルタ
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 予約日でフィルタ
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Appointment'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/worker/appointments/waiting:
+    get:
+      tags:
+        - Worker
+      summary: 待機中予約一覧
+      description: 医師割当待ちの予約一覧を取得します
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  appointments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Appointment'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/worker/appointments/{id}/assign:
+    put:
+      tags:
+        - Worker
+      summary: 医師割当
+      description: 予約に医師を割り当てます
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - workerId
+              properties:
+                workerId:
+                  type: integer
+                  description: 割り当てる医師のID
+      responses:
+        '200':
+          description: 割当成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/worker/appointments/{id}/status:
+    put:
+      tags:
+        - Worker
+      summary: ステータス更新
+      description: 予約のステータスを更新します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  $ref: '#/components/schemas/AppointmentStatus'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/worker/appointments/{id}/details:
+    get:
+      tags:
+        - Worker
+      summary: 診察詳細情報
+      description: 診察に必要な全ての情報を取得します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  appointment:
+                    $ref: '#/components/schemas/Appointment'
+                  questionnaire:
+                    $ref: '#/components/schemas/Questionnaire'
+                  medicalHistory:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MedicalRecord'
+                  previousPrescriptions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Prescription'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/worker/appointments/{id}/start:
+    post:
+      tags:
+        - Worker
+      summary: 診察開始
+      description: 診察を開始し、ビデオ通話セッションを作成します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 開始成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  appointment:
+                    $ref: '#/components/schemas/Appointment'
+                  videoToken:
+                    $ref: '#/components/schemas/VideoToken'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/worker/appointments/{id}/complete:
+    post:
+      tags:
+        - Worker
+      summary: 診察完了
+      description: 診察を完了します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 完了成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/worker/medical-records:
+    post:
+      tags:
+        - Worker
+      summary: カルテ作成
+      description: 新規カルテを作成します
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - appointmentId
+                - subjective
+                - objective
+                - assessment
+                - plan
+              properties:
+                appointmentId:
+                  type: integer
+                subjective:
+                  type: string
+                objective:
+                  type: string
+                assessment:
+                  type: string
+                plan:
+                  type: string
+                vitalSigns:
+                  $ref: '#/components/schemas/VitalSigns'
+      responses:
+        '201':
+          description: 作成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MedicalRecord'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/worker/medical-records/{id}:
+    put:
+      tags:
+        - Worker
+      summary: カルテ更新
+      description: カルテを更新します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subjective:
+                  type: string
+                objective:
+                  type: string
+                assessment:
+                  type: string
+                plan:
+                  type: string
+                vitalSigns:
+                  $ref: '#/components/schemas/VitalSigns'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MedicalRecord'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/worker/prescriptions:
+    post:
+      tags:
+        - Worker
+      summary: 処方箋作成
+      description: 新規処方箋を作成します
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - appointmentId
+                - medications
+              properties:
+                appointmentId:
+                  type: integer
+                medications:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Medication'
+                pharmacyNotes:
+                  type: string
+      responses:
+        '201':
+          description: 作成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Prescription'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/worker/prescriptions/{id}:
+    put:
+      tags:
+        - Worker
+      summary: 処方箋更新
+      description: 処方箋を更新します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                medications:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Medication'
+                pharmacyNotes:
+                  type: string
+                status:
+                  type: string
+                  enum: [draft, issued, dispensed, cancelled]
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Prescription'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags:
+        - Worker
+      summary: 処方箋削除
+      description: 処方箋を削除します（ドラフトのみ）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 削除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: 処方箋を削除しました
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/worker/schedules:
+    get:
+      tags:
+        - Worker
+      summary: スケジュール一覧
+      description: 医師のスケジュール一覧を取得します
+      parameters:
+        - name: workerId
+          in: query
+          schema:
+            type: integer
+          description: 医師IDでフィルタ（未指定時は自分）
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schedules:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkerSchedule'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+    post:
+      tags:
+        - Worker
+      summary: スケジュール登録
+      description: 新規スケジュールを登録します
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - scheduleDate
+                - startTime
+                - endTime
+              properties:
+                scheduleDate:
+                  type: string
+                  format: date
+                startTime:
+                  type: string
+                  format: time
+                endTime:
+                  type: string
+                  format: time
+                maxAppointments:
+                  type: integer
+                  default: 10
+      responses:
+        '201':
+          description: 登録成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerSchedule'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/worker/schedules/{id}:
+    put:
+      tags:
+        - Worker
+      summary: スケジュール更新
+      description: スケジュールを更新します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                startTime:
+                  type: string
+                  format: time
+                endTime:
+                  type: string
+                  format: time
+                status:
+                  type: string
+                  enum: [available, busy, off]
+                maxAppointments:
+                  type: integer
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerSchedule'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags:
+        - Worker
+      summary: スケジュール削除
+      description: スケジュールを削除します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 削除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: スケジュールを削除しました
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/worker/appointments/{id}/chat:
+    get:
+      tags:
+        - Worker
+      summary: チャット履歴取得
+      description: 診察のチャット履歴を取得します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: lastMessageId
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatMessage'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    post:
+      tags:
+        - Worker
+      summary: メッセージ送信
+      description: チャットメッセージを送信します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - content
+              properties:
+                content:
+                  type: string
+                attachmentIds:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '201':
+          description: 送信成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/worker/appointments/{id}/video-token:
+    get:
+      tags:
+        - Worker
+      summary: ビデオ通話トークン取得
+      description: ビデオ通話に参加するためのトークンを取得します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoToken'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/worker/appointments/{id}/recording:
+    post:
+      tags:
+        - Worker
+      summary: 録画URL保存
+      description: ビデオ通話の録画URLを保存します
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - recordingUrl
+              properties:
+                recordingUrl:
+                  type: string
+                  format: uri
+      responses:
+        '200':
+          description: 保存成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: 録画URLを保存しました
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # ==================== 管理者向けAPI ====================
+  /api/admin/workers:
+    get:
+      tags:
+        - Admin
+      summary: 医療従事者一覧
+      description: 医療従事者一覧を取得します（管理者のみ）
+      parameters:
+        - name: role
+          in: query
+          schema:
+            $ref: '#/components/schemas/WorkerRole'
+        - name: isActive
+          in: query
+          schema:
+            type: boolean
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Worker'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+    post:
+      tags:
+        - Admin
+      summary: 医療従事者登録
+      description: 新規医療従事者を登録します（管理者のみ）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - name
+                - role
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                name:
+                  type: string
+                role:
+                  $ref: '#/components/schemas/WorkerRole'
+                password:
+                  type: string
+                  format: password
+                phoneNumber:
+                  type: string
+                medicalLicenseNumber:
+                  type: string
+                specialtyIds:
+                  type: array
+                  items:
+                    type: integer
+                qualificationIds:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '201':
+          description: 登録成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Worker'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/admin/workers/{id}:
+    put:
+      tags:
+        - Admin
+      summary: 医療従事者更新
+      description: 医療従事者情報を更新します（管理者のみ）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                role:
+                  $ref: '#/components/schemas/WorkerRole'
+                phoneNumber:
+                  type: string
+                medicalLicenseNumber:
+                  type: string
+                isActive:
+                  type: boolean
+                specialtyIds:
+                  type: array
+                  items:
+                    type: integer
+                qualificationIds:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Worker'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags:
+        - Admin
+      summary: 医療従事者削除
+      description: 医療従事者を削除します（管理者のみ）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 削除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: 医療従事者を削除しました
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/admin/specialties:
+    get:
+      tags:
+        - Admin
+      summary: 診療科一覧
+      description: 診療科マスタ一覧を取得します
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  specialties:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Specialty'
+
+  /api/admin/qualifications:
+    get:
+      tags:
+        - Admin
+      summary: 資格一覧
+      description: 資格マスタ一覧を取得します
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [specialist, certified, instructor, subspecialty, designated]
+      responses:
+        '200':
+          description: 取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  qualifications:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Qualification'

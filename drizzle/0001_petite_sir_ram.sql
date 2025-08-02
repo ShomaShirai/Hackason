@@ -1,0 +1,1 @@
+ALTER TABLE `medical_records` ADD `prescriptions` text DEFAULT '[]';

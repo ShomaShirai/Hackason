@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vitest/globals", "@cloudflare/workers-types/2023-07-01"]
+  },
+  "include": ["test/**/*.ts", "workers/__tests__/**/*.ts", "vitest.config.ts"],
+  "exclude": ["node_modules"]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "medical-consultation-test",
+  "main": "workers/app.ts",
+  "compatibility_date": "2024-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "vars": {
+    "NODE_ENV": "development"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "medical-consultation-db",
+      "database_id": "local",
+      "preview_database_id": "local"
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SIGNALING_ROOM",
+        "class_name": "SignalingRoom"
+      }
+    ]
+  },
+
+  "assets": {
+    "directory": "public"
+  }
+}

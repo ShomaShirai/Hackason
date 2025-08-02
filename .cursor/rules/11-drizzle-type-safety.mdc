@@ -1,0 +1,109 @@
+---
+globs: workers/repositories/*.ts
+alwaysApply: false
+---
+# Drizzle ORM Type Safety Best Practices
+
+## 1. 型推論の活用
+```typescript
+// ✅ 良い例: InferSelectModel/InferInsertModelを使用
+import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
+export type Worker = InferSelectModel<typeof workers>;
+export type NewWorker = InferInsertModel<typeof workers>;
+
+// ❌ 悪い例: 手動で型定義
+interface Worker { id: number; name: string; ... }
+```
+
+## 2. 単一レコード取得の型安全な実装
+```typescript
+// ✅ 良い例: 配列から明示的に取得
+const result = await db.select().from(users).where(eq(users.id, 1)).limit(1).all();
+const user = result[0]; // user: User | undefined
+
+// ❌ 悪い例: .get()はD1では使用不可
+const user = await db.select().from(users).where(eq(users.id, 1)).get();
+```
+
+## 3. カウント処理の型安全な実装
+```typescript
+// ✅ 良い例: sql<number>を使用
+const [{ count }] = await db.select({ count: sql<number>`count(*)` })
+  .from(users).all();
+
+// ❌ 悪い例: count()関数（引数エラーになる）
+const result = await db.select({ count: count() }).from(users).all();
+```
+
+## 4. JOIN結果の型定義
+```typescript
+// ✅ 良い例: 明示的なカラム指定
+const results = await db.select({
+  id: appointments.id,
+  patientName: patients.name,
+  doctorName: workers.name,
+}).from(appointments)
+  .leftJoin(patients, eq(appointments.patientId, patients.id))
+  .leftJoin(workers, eq(appointments.assignedWorkerId, workers.id))
+  .all();
+```
+
+## 5. リポジトリパターンでの統一型
+```typescript
+// D1とLibSQLの両方に対応
+type Database = DrizzleD1Database | LibSQLDatabase;
+export class Repository {
+  constructor(private db: Database) {}
+}# Drizzle ORM Type Safety Best Practices
+
+## 1. 型推論の活用
+```typescript
+// ✅ 良い例: InferSelectModel/InferInsertModelを使用
+import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
+export type Worker = InferSelectModel<typeof workers>;
+export type NewWorker = InferInsertModel<typeof workers>;
+
+// ❌ 悪い例: 手動で型定義
+interface Worker { id: number; name: string; ... }
+```
+
+## 2. 単一レコード取得の型安全な実装
+```typescript
+// ✅ 良い例: 配列から明示的に取得
+const result = await db.select().from(users).where(eq(users.id, 1)).limit(1).all();
+const user = result[0]; // user: User | undefined
+
+// ❌ 悪い例: .get()はD1では使用不可
+const user = await db.select().from(users).where(eq(users.id, 1)).get();
+```
+
+## 3. カウント処理の型安全な実装
+```typescript
+// ✅ 良い例: sql<number>を使用
+const [{ count }] = await db.select({ count: sql<number>`count(*)` })
+  .from(users).all();
+
+// ❌ 悪い例: count()関数（引数エラーになる）
+const result = await db.select({ count: count() }).from(users).all();
+```
+
+## 4. JOIN結果の型定義
+```typescript
+// ✅ 良い例: 明示的なカラム指定
+const results = await db.select({
+  id: appointments.id,
+  patientName: patients.name,
+  doctorName: workers.name,
+}).from(appointments)
+  .leftJoin(patients, eq(appointments.patientId, patients.id))
+  .leftJoin(workers, eq(appointments.assignedWorkerId, workers.id))
+  .all();
+```
+
+## 5. リポジトリパターンでの統一型
+```typescript
+// D1とLibSQLの両方に対応
+type Database = DrizzleD1Database | LibSQLDatabase;
+export class Repository {
+  constructor(private db: Database) {}
+}

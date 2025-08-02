@@ -1,0 +1,153 @@
+---
+alwaysApply: true
+---
+
+
+**現在日時は terminal で `date` コマンドで確認**
+
+# Cursor Rules Overview
+
+## rule-index
+
+### 開発標準
+- `01-development.mdc`: 開発標準・品質保証（Context7活用・Playwright自動テスト・Lint実行）
+
+### タスク管理・Git操作（20番台）
+- `20-feedback.mdc`: ユーザーフィードバック仕様
+- `21-taskfile.mdc`: タスクファイル実行（/do-taskfile）
+- `22-taskfile-gen.mdc`: タスクファイル生成（/gen-taskfile）
+- `24-commit.mdc`: Gitコミット（/commit）
+- `25-pull-request.mdc`: プルリクエスト作成（/pr）
+
+### ルール管理（30番台）
+- `30-rule-gen.mdc`: ルールファイル生成（/rule-gen）
+
+### 学習システム
+- `learning/`: 開発時の学びを記録・活用するシステム（※現在準備中）
+
+
+## プロジェクト情報
+
+**プロジェクト名**: fd-hackathon-2025-internal
+**概要**: ファストドクター主催「オンライン診療AI活用ハッカソン」開発基盤
+**対象**: 高校生〜大学院生（2025年4月開催予定）
+
+## 概要
+
+本プロジェクトでは、開発効率と品質向上のため、Cursor Rules を活用して標準的な作業手順を定義しています。ハッカソン参加者の教育的支援と、医療データの適切な取り扱いを重視しています。
+
+### ルール分類
+
+- **10 番台**: プロジェクト基盤（Issue、フィードバック）
+- **20 番台**: タスク管理・Git 操作
+- **30 番台**: ルール管理・メタ情報
+- **40 番台**: 技術固有標準（Python 等）
+- **learning/**: 学習システムコマンド（開発時の学びを記録・活用）
+
+## 重要な注意事項
+
+### セキュリティ・プライバシー
+
+- **秘密情報チェック**: コミット時は API_KEY、パスワード、個人情報を必ず確認（24-commit.mdc）
+- **医療データ**: 実患者データは使用禁止、ダミーデータのみ使用
+- **個人情報の匿名化**: ナレッジ生成時は「山田太郎さん」等の架空の一般的な名前を使用
+
+### ハッカソン固有の配慮
+
+- **教育的アプローチ**: 参加者の学習を支援する説明的な対応
+- **技術制約**: Amazon Chime SDK必須、医療法規制への配慮
+- **アンチハラスメント**: すべての参加者に安全で歓迎される環境を維持
+
+## 開発環境起動方法
+
+### 統合構成（React Router + Hono）
+
+```bash
+# 初回セットアップ
+npm install
+npx drizzle-kit push
+npm run seed:local
+
+# 開発時
+npm run dev  # → localhost:8787（フロントエンド・バックエンド統合）
+```
+
+### デモ認証情報
+
+- **患者**: `patient@test.com` / `test1234`
+- **医師**: `doctor@test.com` / `test1234`
+
+### 技術構成
+
+- **フロントエンド**: React 19 + React Router 7 + Tailwind CSS
+- **バックエンド**: Hono + Cloudflare Workers + D1ローカル
+- **認証**: JWT + bcryptjs (saltRounds=10)
+- **データベース**: Drizzle ORM + SQLite（ローカル）
+
+## プロジェクト構造
+
+### ディレクトリ構成
+
+```text
+app/                    # React Router フロントエンド
+├── routes/            # ページルーティング
+├── entry.server.tsx   # サーバーエントリーポイント
+└── root.tsx          # ルートレイアウト
+
+workers/               # Hono バックエンド
+├── app.ts            # メインアプリケーション（D1バインディング）
+├── auth/             # 認証関連
+└── db/               # データベーススキーマ
+
+docs/                  # API仕様書・開発ガイド
+├── api/              # API仕様書・設計
+└── frontend/         # フロントエンド仕様
+
+knowledge/             # ナレッジベース
+├── technical/         # Amazon Chime SDK等の技術資料
+├── business/          # オンライン診療ドメイン知識
+└── hackathon/         # 参加ガイドライン・サンプル
+
+work/taskfile/         # タスクファイル管理
+drizzle/              # データベースマイグレーション
+├── 0000_known_mystique.sql  # 最新マイグレーション
+└── meta/             # マイグレーション管理
+
+.wrangler/state/v3/d1/ # D1ローカルデータベース
+tmp-script/           # 一時的なスクリプトはここに配置
+
+.cursor/rules/        # Cursorルール体系
+├── 00-overview.mdc   # プロジェクト全体のルールインデックス
+├── 01-development    # 開発標準・品質保証
+├── 20番台            # タスク管理・Git操作
+├── 30番台            # ルール管理
+└── learning/         # 開発時の学びを記録・活用するシステム
+```
+
+## 補足情報
+
+### 日時の取得
+
+- **現在日時は terminal で `date` コマンドで確認**
+- 学習データに依存せず、実際の日時を基に作業する
+
+### 開発フロー
+
+1. **データベース初期化**: `npx drizzle-kit push && npm run seed:local`
+2. **統合型起動**: `npm run dev`でフロントエンド・バックエンド両方起動（8787）
+3. **認証テスト**: ブラウザで患者・医師ログイン確認
+4. **品質確認**: `npm run lint`
+5. **コミット**: `/commit` コマンドで秘密情報チェック付き
+
+## 主要ナレッジベース
+
+### 技術ナレッジ
+- [D1ローカルデータ投入手順](../../knowledge/technical/d1-local-data-setup.md) - Cloudflare D1のローカル環境へのデータ投入方法
+- [Amazon Chime SDK分析](../../knowledge/technical/amazon-chime-sample-memo/telehealth-widget-analysis.md)
+- [Cloudflare Orange分析](../../knowledge/technical/cloudflare-orange-analysis.md)
+
+### ビジネスナレッジ
+- [ユースケース仕様書](../../knowledge/business/online-medical/use-cases-specification.md)
+
+### ハッカソン資料
+- 参加ガイドライン（準備中）

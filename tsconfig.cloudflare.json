@@ -1,0 +1,48 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    ".react-router/types/**/*",
+    "app/**/*",
+    "app/**/.server/**/*",
+    "app/**/.client/**/*",
+    "workers/**/*",
+    "worker-configuration.d.ts",
+    "types/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "workers/seed-data-generator.ts",
+    "workers/generate-hash.js",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "tmp-script/**/*"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./tsconfig.cloudflare.tsbuildinfo",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "types": ["@cloudflare/workers-types", "vite/client"],
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "rootDirs": [".", "./.react-router/types"],
+    "paths": {
+      "~/*": ["./app/*"],
+      "@/*": ["./workers/*"]
+    },
+    // React関連設定
+    "allowJs": true,
+    "isolatedModules": true,
+    "noEmit": true,
+
+    // ソースマップ設定（開発時のデバッグ改善）
+    "sourceMap": true,
+    "inlineSourceMap": false,
+    "inlineSources": false,
+
+    // Cloudflare Workers特有の設定
+    "allowSyntheticDefaultImports": true,
+    "moduleDetection": "force"
+  }
+}
