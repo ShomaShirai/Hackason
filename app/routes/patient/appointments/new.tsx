@@ -147,6 +147,8 @@ export default function NewAppointment() {
   const [chiefComplaint, setChiefComplaint] = useState("")
   const [chatMessages, setChatMessages] = useState<{id: string, text: string, isUser: boolean, timestamp: Date}[]>([])
   const [currentInput, setCurrentInput] = useState("")
+  const [questionnaireData, setQuestionnaireData] = useState<string | null>(null)
+  const [showQuestionnaire, setShowQuestionnaire] = useState(false)
   const [appointmentType, setAppointmentType] = useState<"initial" | "followup">("initial")
 
   // クライアントサイドでのスロット取得
@@ -305,6 +307,34 @@ export default function NewAppointment() {
     await handleDIFYAPICall(messageToSend, newChatMessages)
   }
 
+  // マークダウン判定関数
+  const isMarkdownQuestionnaire = (text: string): boolean => {
+    // マークダウンの特徴的なパターンをチェック
+    const markdownPatterns = [
+      /^#{1,6}\s+/m,        // ヘッダー
+      /\*\*[^*]+\*\*/,      // 太字
+      /\*[^*]+\*/,          // 斜体
+      /^\s*[-*+]\s+/m,      // リスト
+      /^\s*\d+\.\s+/m,     // 番号付きリスト
+      /^\s*\|.+\|\s*$/m,   // テーブル
+      /```[\s\S]*?```/,    // コードブロック
+    ]
+    
+    // 問診関連のキーワードもチェック
+    const questionnaireKeywords = [
+      '問診表',
+      '問診結果',
+      '診断情報',
+      '症状まとめ',
+      '受診内容'
+    ]
+    
+    const hasMarkdownPatterns = markdownPatterns.some(pattern => pattern.test(text))
+    const hasQuestionnaireKeywords = questionnaireKeywords.some(keyword => text.includes(keyword))
+    
+    return hasMarkdownPatterns && hasQuestionnaireKeywords
+  }
+
   // DIFY API呼び出し関数
   const handleDIFYAPICall = async (message: string, currentChatMessages: typeof chatMessages) => {
     setIsExternalAPILoading(true)
@@ -336,19 +366,27 @@ export default function NewAppointment() {
         comment: string
       }
       
-      // AIの応答をチャットに追加
-      const aiMessage = {
-        id: (Date.now() + 1).toString(),
-        text: result.comment,
-        isUser: false,
-        timestamp: new Date()
+      // マークダウン形式の問診表かチェック
+      if (isMarkdownQuestionnaire(result.comment)) {
+        // マークダウンの場合は問診表データのみ保存し、チャットには表示しない
+        setQuestionnaireData(result.comment)
+        // 主訴フィールドは現在のチャット履歴のみで更新
+        setChiefComplaint(currentChatMessages.map(msg => `${msg.isUser ? '患者' : 'AI'}: ${msg.text}`).join('\n'))
+      } else {
+        // 通常のメッセージの場合はチャットに追加
+        const aiMessage = {
+          id: (Date.now() + 1).toString(),
+          text: result.comment,
+          isUser: false,
+          timestamp: new Date()
+        }
+        
+        const updatedMessages = [...currentChatMessages, aiMessage]
+        setChatMessages(updatedMessages)
+        
+        // 主訴フィールドも更新
+        setChiefComplaint(updatedMessages.map(msg => `${msg.isUser ? '患者' : 'AI'}: ${msg.text}`).join('\n'))
       }
-      
-      const updatedMessages = [...currentChatMessages, aiMessage]
-      setChatMessages(updatedMessages)
-      
-      // 主訴フィールドも更新
-      setChiefComplaint(updatedMessages.map(msg => `${msg.isUser ? '患者' : 'AI'}: ${msg.text}`).join('\n'))
       
     } catch (error) {
       console.error('DIFY API error:', error)
@@ -655,6 +693,22 @@ export default function NewAppointment() {
                       )}
                     </div>
                     
+                    {/* 問診表ボタン */}
+                    {questionnaireData && (
+                      <div className="px-4 py-2 border-t border-gray-300 bg-gray-50">
+                        <button
+                          type="button"
+                          onClick={() => setShowQuestionnaire(true)}
+                          className="w-full bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 transition-colors flex items-center justify-center gap-2"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          問診表を確認
+                        </button>
+                      </div>
+                    )}
+                    
                     {/* メッセージ入力エリア */}
                     <div className="border-t border-gray-300 p-4">
                       <div className="flex gap-2">
@@ -780,7 +834,90 @@ export default function NewAppointment() {
             </form>
           </div>
         )}
+        
+        {/* 問診表モーダル */}
+        {showQuestionnaire && questionnaireData && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden">
+              {/* モーダルヘッダー */}
+              <div className="flex justify-between items-center p-6 border-b border-gray-200">
+                <h2 className="text-xl font-semibold text-gray-900">問診表</h2>
+                <button
+                  onClick={() => setShowQuestionnaire(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              {/* モーダルコンテンツ */}
+              <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+                <div className="prose max-w-none">
+                  <MarkdownRenderer content={questionnaireData} />
+                </div>
+              </div>
+              
+              {/* モーダルフッター */}
+              <div className="flex justify-end gap-3 p-6 border-t border-gray-200">
+                <button
+                  onClick={() => navigator.clipboard?.writeText(questionnaireData)}
+                  className="bg-gray-500 text-white px-4 py-2 rounded-md hover:bg-gray-600 transition-colors flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                  </svg>
+                  コピー
+                </button>
+                <button
+                  onClick={() => setShowQuestionnaire(false)}
+                  className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 transition-colors"
+                >
+                  閉じる
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </RequireAuth>
+  )
+}
+
+// 簡易マークダウンレンダラーコンポーネント
+function MarkdownRenderer({ content }: { content: string }) {
+  // 基本的なマークダウン記法をHTMLに変換
+  const renderMarkdown = (text: string) => {
+    let html = text
+    
+    // ヘッダー (# ## ### など)
+    html = html.replace(/^### (.*$)/gim, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>')
+    html = html.replace(/^## (.*$)/gim, '<h2 class="text-xl font-semibold mt-6 mb-3">$1</h2>')
+    html = html.replace(/^# (.*$)/gim, '<h1 class="text-2xl font-bold mt-8 mb-4">$1</h1>')
+    
+    // 太字 **text**
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>')
+    
+    // 斜体 *text*
+    html = html.replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
+    
+    // リスト項目 - または *
+    html = html.replace(/^[\s]*[-*+]\s+(.*$)/gim, '<li class="ml-4 mb-1">• $1</li>')
+    
+    // 番号付きリスト 1.
+    html = html.replace(/^[\s]*(\d+)\.\s+(.*$)/gim, '<li class="ml-4 mb-1">$1. $2</li>')
+    
+    // 改行を<br>に変換
+    html = html.replace(/\n/g, '<br>')
+    
+    return html
+  }
+
+  return (
+    <div 
+      className="text-gray-800 leading-relaxed"
+      dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+    />
   )
 }
