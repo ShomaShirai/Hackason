@@ -14,8 +14,6 @@ const SymptomAnalysisRequest = z.object({
 
 // レスポンススキーマ
 const SymptomAnalysisResponse = z.object({
-  recommendedSpecialty: z.string(),
-  urgency: z.enum(['low', 'medium', 'high']),
   comment: z.string()
 })
 
@@ -53,7 +51,6 @@ async function callExternalAI(symptoms: string, context: any, env: any) {
     console.error('Dify API error:', error)
     // フォールバック: モック分析を使用
     console.log('Falling back to mock analysis')
-    return analyzeSymptomsMock(symptoms, context)
   }
 }
 
@@ -98,23 +95,12 @@ async function callDifyAPI(symptoms: string, context: any, env: any) {
 function parseDifyResponse(difyResponse: any) {
   try {
     // Difyのレスポンスから回答テキストを取得
-    const answer = difyResponse.message || difyResponse.text || ''
+    const answer = difyResponse.answer || difyResponse.message || ''
     console.log('DIFYのレスポンス', answer)
     
-    // JSON形式の回答を抽出
-    // const jsonMatch = answer.match(/\{[\s\S]*\}/)
-    // if (jsonMatch) {
-    //   const parsed = JSON.parse(jsonMatch[0])
-    //   return {
-    //     comment: parsed.comment || '症状を詳しく診察する必要があります。'
-    //   }
-    // }
     return {
       comment: answer || '症状を詳しく診察する必要があります。'
     }
-    
-    // JSONが見つからない場合は、テキストから推測
-    // return parseTextResponse(answer)
   } catch (error) {
     console.error('Failed to parse Dify response:', error)
     // フォールバック: テキストから推測
@@ -157,74 +143,6 @@ function parseTextResponse(text: string) {
     recommendedSpecialty,
     urgency,
     comment: text || '症状を詳しく診察する必要があります。'
-  }
-}
-
-// モック症状分析関数（フォールバック用）
-function analyzeSymptomsMock(symptoms: string, context: any) {
-  const lowerSymptoms = symptoms.toLowerCase()
-  
-  // 症状に基づく推奨診療科の判定
-  let recommendedSpecialty = '内科'
-  let urgency: 'low' | 'medium' | 'high' = 'low'
-  let comment = ''
-
-  if (lowerSymptoms.includes('発熱') || lowerSymptoms.includes('熱')) {
-    if (lowerSymptoms.includes('高熱') || lowerSymptoms.includes('40度')) {
-      urgency = 'high'
-      comment = '高熱のため、早めの受診をお勧めします。'
-    } else {
-      urgency = 'medium'
-      comment = '発熱症状があります。水分補給を十分に行ってください。'
-    }
-  }
-
-  if (lowerSymptoms.includes('頭痛') || lowerSymptoms.includes('頭が痛い')) {
-    if (lowerSymptoms.includes('激しい') || lowerSymptoms.includes('耐えられない')) {
-      urgency = 'high'
-      comment = '激しい頭痛のため、神経内科または脳神経外科の受診を検討してください。'
-      recommendedSpecialty = '神経内科'
-    } else {
-      urgency = 'medium'
-      comment = '頭痛症状があります。安静にして様子を見てください。'
-    }
-  }
-
-  if (lowerSymptoms.includes('腹痛') || lowerSymptoms.includes('お腹が痛い')) {
-    urgency = 'medium'
-    comment = '腹痛症状があります。消化器内科の受診をお勧めします。'
-    recommendedSpecialty = '消化器内科'
-  }
-
-  if (lowerSymptoms.includes('咳') || lowerSymptoms.includes('痰')) {
-    urgency = 'medium'
-    comment = '呼吸器症状があります。呼吸器内科の受診をお勧めします。'
-    recommendedSpecialty = '呼吸器内科'
-  }
-
-  if (lowerSymptoms.includes('皮膚') || lowerSymptoms.includes('かゆみ') || lowerSymptoms.includes('湿疹')) {
-    urgency = 'low'
-    comment = '皮膚症状があります。皮膚科の受診をお勧めします。'
-    recommendedSpecialty = '皮膚科'
-  }
-
-  if (lowerSymptoms.includes('耳') || lowerSymptoms.includes('鼻') || lowerSymptoms.includes('喉')) {
-    urgency = 'low'
-    comment = '耳鼻咽喉科の受診をお勧めします。'
-    recommendedSpecialty = '耳鼻咽喉科'
-  }
-
-  // 緊急症状のチェック
-  if (lowerSymptoms.includes('胸痛') || lowerSymptoms.includes('息苦しい') || lowerSymptoms.includes('意識')) {
-    urgency = 'high'
-    comment = '緊急症状の可能性があります。救急外来または救急車の利用を検討してください。'
-    recommendedSpecialty = '救急科'
-  }
-
-  return {
-    recommendedSpecialty,
-    urgency,
-    comment: comment || '症状を詳しく診察する必要があります。'
   }
 }
 
