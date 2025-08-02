@@ -1,6 +1,6 @@
-import type { RepositoryFactory } from '../repositories/interfaces';
-import type { VideoSession, Appointment } from '../db/types';
+import type { Appointment, VideoSession } from '../db/types';
 import type { CloudflareCallsClient } from '../realtime/calls-client';
+import type { RepositoryFactory } from '../repositories/interfaces';
 
 export interface User {
   id: string;
@@ -88,8 +88,6 @@ export class VideoSessionService {
       appointmentId: parseInt(appointmentId),
       realtimeSessionId,
       status: 'active',
-      createdAt: new Date(),
-      startedAt: new Date(),
       endedAt: null,
       recordingUrl: null,
       participants: null,

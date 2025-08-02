@@ -1,8 +1,12 @@
-import { useState, useCallback, useEffect } from 'react';
-import { CloudflareRealtimeVideo } from './CloudflareRealtimeVideo';
-import { PatientInfoPanel } from './PatientInfoPanel';
+import { useCallback, useEffect, useState } from 'react';
+import { CallSettingsModal } from './CallSettingsModal';
 import { DoctorChatPanel } from './chat/DoctorChatPanel';
+import { CloudflareRealtimeVideo } from './CloudflareRealtimeVideo';
+import { ConnectionErrorHandler } from './ConnectionErrorHandler';
+import { ConnectionQualityMonitor } from './ConnectionQualityMonitor';
+import { EnhancedCallControls } from './EnhancedCallControls';
 import { MedicalRecordPanel } from './MedicalRecordPanel';
+import { PatientInfoPanel } from './PatientInfoPanel';
 
 interface MedicalVideoCallProps {
   appointmentId: string;
@@ -23,14 +27,137 @@ export function MedicalVideoCall({
   const [connectionMetrics, setConnectionMetrics] = useState<any>(null);
   const [networkError, setNetworkError] = useState<string | null>(null);
   const [patientInfo] = useState<{ name: string } | null>(null);
+  const [mediaControls, setMediaControls] = useState({
+    audio: false,
+    video: false,
+    screenShare: false
+  });
+  const [connectionError, setConnectionError] = useState<{
+    message: string;
+    type: 'network' | 'permission' | 'device' | 'server' | 'unknown';
+    timestamp: Date;
+    retryCount: number;
+  } | null>(null);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [callSettings, setCallSettings] = useState({
+    videoQuality: 'medium' as const,
+    audioQuality: 'medium' as const,
+    selectedCamera: '',
+    selectedMicrophone: '',
+    enableEchoCancellation: true,
+    enableNoiseReduction: true
+  });
+
+  const [videoRef, setVideoRef] = useState<{
+    toggleAudio: (enabled: boolean) => void;
+    toggleVideo: (enabled: boolean) => void;
+    endCall: () => void;
+  } | null>(null);
 
   const handleTogglePanel = useCallback(() => {
     setIsPanelCollapsed(prev => !prev);
   }, []);
 
   const handleSessionEnd = useCallback(() => {
+    console.log('🔴 handleSessionEnd called');
+
+    // 即座に親コンポーネントのコールバックを実行（画面遷移を優先）
+    console.log('🔴 Calling onSessionEnd callback immediately');
     onSessionEnd?.();
-  }, [onSessionEnd]);
+
+    // 実際の通話終了処理を非同期で実行（バックグラウンド）
+    setTimeout(() => {
+      if (videoRef) {
+        console.log('🔴 Calling videoRef.endCall()');
+        videoRef.endCall();
+      }
+    }, 100);
+  }, [onSessionEnd, videoRef]);
+
+  const handleToggleAudio = useCallback(() => {
+    const newAudioState = !mediaControls.audio;
+    setMediaControls(prev => ({ ...prev, audio: newAudioState }));
+
+    // 実際のメディア制御を実行
+    if (videoRef) {
+      videoRef.toggleAudio(newAudioState);
+    }
+
+    console.log('音声切り替え:', newAudioState);
+  }, [mediaControls.audio, videoRef]);
+
+  const handleToggleVideo = useCallback(() => {
+    const newVideoState = !mediaControls.video;
+    setMediaControls(prev => ({ ...prev, video: newVideoState }));
+
+    // 実際のメディア制御を実行
+    if (videoRef) {
+      videoRef.toggleVideo(newVideoState);
+    }
+
+    console.log('ビデオ切り替え:', newVideoState);
+  }, [mediaControls.video, videoRef]);
+
+  const handleToggleScreenShare = useCallback(async () => {
+    const newScreenShareState = !mediaControls.screenShare;
+
+    try {
+      if (newScreenShareState) {
+        // 画面共有開始
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: false
+        });
+
+        if (screenStream) {
+          setMediaControls(prev => ({ ...prev, screenShare: true }));
+          console.log('画面共有開始');
+
+          // 画面共有終了時の処理
+          screenStream.getTracks().forEach(track => {
+            track.onended = () => {
+              console.log('画面共有終了');
+              setMediaControls(prev => ({ ...prev, screenShare: false }));
+            };
+          });
+        } else {
+          console.error('画面共有の開始に失敗しました');
+        }
+      } else {
+        // 画面共有停止
+        setMediaControls(prev => ({ ...prev, screenShare: false }));
+        console.log('画面共有停止');
+      }
+    } catch (error) {
+      console.error('画面共有切り替えエラー:', error);
+    }
+  }, [mediaControls.screenShare]);
+
+  const handleSettings = useCallback(() => {
+    setIsSettingsModalOpen(true);
+  }, []);
+
+  const handleSettingsSave = useCallback((newSettings: any) => {
+    setCallSettings(newSettings);
+    console.log('設定を保存:', newSettings);
+    // TODO: WebRTCマネージャーに設定を適用
+  }, []);
+
+  const handleErrorRetry = useCallback(() => {
+    if (connectionError) {
+      setConnectionError(prev => prev ? {
+        ...prev,
+        retryCount: Math.min(prev.retryCount + 1, 3),
+        timestamp: new Date()
+      } : null);
+    }
+    setNetworkError(null);
+  }, [connectionError]);
+
+  const handleErrorDismiss = useCallback(() => {
+    setConnectionError(null);
+    setNetworkError(null);
+  }, []);
 
   // 診察時間の更新
   useEffect(() => {
@@ -48,9 +175,30 @@ export function MedicalVideoCall({
     let reconnectTimer: ReturnType<typeof setTimeout>;
 
     if (networkError) {
+      // エラーメッセージからエラータイプを判定
+      let errorType: 'network' | 'permission' | 'device' | 'server' | 'unknown' = 'unknown';
+
+      if (networkError.includes('カメラ') || networkError.includes('マイク') || networkError.includes('権限')) {
+        errorType = 'permission';
+      } else if (networkError.includes('デバイス') || networkError.includes('カメラ') || networkError.includes('マイク')) {
+        errorType = 'device';
+      } else if (networkError.includes('サーバー') || networkError.includes('API')) {
+        errorType = 'server';
+      } else if (networkError.includes('ネットワーク') || networkError.includes('接続')) {
+        errorType = 'network';
+      }
+
+      setConnectionError({
+        message: networkError,
+        type: errorType,
+        timestamp: new Date(),
+        retryCount: 0
+      });
+
       reconnectTimer = setTimeout(() => {
         setNetworkError(null);
-      }, 5000);
+        setConnectionError(null);
+      }, 10000); // 10秒後に自動でクリア
     }
 
     return () => {
@@ -69,73 +217,70 @@ export function MedicalVideoCall({
   return (
     <div className="h-screen bg-gray-900 flex">
       {/* メインビデオエリア */}
-      <div className={`flex-1 transition-all duration-300 ${
-        userType === 'worker' && workerRole === 'doctor' ? 'mr-0' : ''
-      }`}>
+      <div className={`flex-1 transition-all duration-300 ${userType === 'worker' && workerRole === 'doctor' ? 'mr-0' : ''
+        }`}>
         <div className="relative h-full">
           <CloudflareRealtimeVideo
             appointmentId={appointmentId}
             userType={userType}
             onSessionEnd={handleSessionEnd}
             onConnectionMetrics={setConnectionMetrics}
+            onToggleAudio={handleToggleAudio}
+            onToggleVideo={handleToggleVideo}
+            mediaControls={mediaControls}
+            onRef={setVideoRef}
           />
 
-          {/* コントロールパネル */}
-          <div className="absolute bottom-0 left-0 right-0 p-4">
-            <div className="bg-white bg-opacity-90 backdrop-blur-sm rounded-lg p-4 shadow-lg">
-              <div className="flex items-center justify-between">
-                {/* 診察時間 */}
-                <div className="flex items-center gap-4">
-                  <div className="text-sm text-gray-600">
-                    診察時間: {formatDuration(consultationDuration)}
-                  </div>
+          {/* 接続品質モニター */}
+          <div className="absolute top-4 right-4 z-10">
+            <ConnectionQualityMonitor
+              metrics={connectionMetrics}
+              className="max-w-xs"
+            />
+          </div>
 
-                  {/* 接続品質インジケーター */}
-                  {connectionMetrics && (
-                    <div className="flex items-center gap-2">
-                      <div className={`w-3 h-3 rounded-full ${
-                        connectionMetrics.quality === 'good' ? 'bg-green-500' :
-                        connectionMetrics.quality === 'fair' ? 'bg-yellow-500' : 'bg-red-500'
-                      }`}></div>
-                      <span className="text-sm text-gray-600">
-                        {connectionMetrics.quality === 'good' ? '良好' :
-                         connectionMetrics.quality === 'fair' ? '普通' : '不安定'}
-                      </span>
-                    </div>
-                  )}
+          {/* エラーハンドラー */}
+          {connectionError && (
+            <div className="absolute top-4 left-4 z-20">
+              <ConnectionErrorHandler
+                error={connectionError}
+                onRetry={handleErrorRetry}
+                onDismiss={handleErrorDismiss}
+                className="max-w-md"
+              />
+            </div>
+          )}
 
-                  {/* ネットワークエラー表示 */}
-                  {networkError && (
-                    <div className="text-sm text-red-600 flex items-center gap-1">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                      </svg>
-                      {networkError}
-                    </div>
-                  )}
-                </div>
-
-                {/* コントロールボタン */}
-                <div className="flex items-center gap-2">
-                  {/* 通話終了ボタン */}
-                  <button
-                    onClick={handleSessionEnd}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
-                  >
-                    通話終了
-                  </button>
-                </div>
+          {/* 診察時間表示 */}
+          <div className="absolute top-4 left-4 z-10">
+            <div className="bg-black/20 backdrop-blur-sm rounded-lg p-3">
+              <div className="text-white text-sm">
+                <div className="font-medium">診察時間</div>
+                <div className="text-lg font-bold">{formatDuration(consultationDuration)}</div>
               </div>
             </div>
+          </div>
+
+          {/* 改良されたコントロールパネル */}
+          <div className="absolute bottom-0 left-0 right-0">
+            <EnhancedCallControls
+              mediaControls={mediaControls}
+              onToggleAudio={handleToggleAudio}
+              onToggleVideo={handleToggleVideo}
+              onToggleScreenShare={handleToggleScreenShare}
+              onEndCall={handleSessionEnd}
+              onSettings={handleSettings}
+              isConnecting={false} // TODO: 接続状態を動的に取得
+              connectionState={connectionMetrics?.connectionState || 'connecting'}
+            />
           </div>
         </div>
       </div>
 
       {/* 医師用サイドパネル */}
       {userType === 'worker' && workerRole === 'doctor' && (
-        <div className={`w-96 bg-gray-50 border-l border-gray-200 transition-all duration-300 ${
-          isPanelCollapsed ? 'w-12' : 'w-96'
-        }`}>
+        <div className={`w-96 bg-gray-50 border-l border-gray-200 transition-all duration-300 ${isPanelCollapsed ? 'w-12' : 'w-96'
+          }`}>
           <div className="h-full flex flex-col overflow-hidden">
             {/* パネルヘッダー */}
             <div className="p-4 border-b border-gray-200 bg-white">
@@ -149,9 +294,8 @@ export function MedicalVideoCall({
                   title={isPanelCollapsed ? '展開' : '折りたたみ'}
                 >
                   <svg
-                    className={`w-5 h-5 text-gray-600 transition-transform ${
-                      isPanelCollapsed ? 'rotate-180' : ''
-                    }`}
+                    className={`w-5 h-5 text-gray-600 transition-transform ${isPanelCollapsed ? 'rotate-180' : ''
+                      }`}
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -170,7 +314,7 @@ export function MedicalVideoCall({
                   <PatientInfoPanel
                     appointmentId={appointmentId}
                     isCollapsed={false}
-                    onToggleCollapse={() => {}}
+                    onToggleCollapse={() => { }}
                   />
 
                   {/* カルテ記入パネル */}
@@ -211,6 +355,14 @@ export function MedicalVideoCall({
           サポート
         </button>
       )}
+
+      {/* 設定モーダル */}
+      <CallSettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        onSave={handleSettingsSave}
+        currentSettings={callSettings}
+      />
     </div>
   );
 }

@@ -1,37 +1,37 @@
-import { Hono } from 'hono';
-import { createRequestHandler } from 'react-router';
-import { cors } from 'hono/cors';
-import { drizzle as drizzleD1 } from 'drizzle-orm/d1';
-import { drizzle as drizzleLibSQL } from 'drizzle-orm/libsql';
 import { createClient } from '@libsql/client';
 import * as dotenv from 'dotenv';
+import { and, desc, eq, gte, isNotNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { drizzle as drizzleD1 } from 'drizzle-orm/d1';
+import { drizzle as drizzleLibSQL } from 'drizzle-orm/libsql';
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import { createRequestHandler } from 'react-router';
 import { shouldIgnorePath } from './config/ignored-paths';
+import { appointments, medicalRecords, patients, questionnaires, videoSessions, workers } from './db/schema';
 
 // ローカル開発環境で.env.localを読み込む
 if (typeof process !== 'undefined' && process.env.NODE_ENV === 'development') {
   dotenv.config({ path: '.env.local' });
 }
-import { patients, workers, appointments, videoSessions, medicalRecords, questionnaires } from './db/schema';
-import { eq, and, gte, lt, desc, or, isNotNull, min, sql, type SQL } from 'drizzle-orm';
 
 // 認証関連のインポート
 import { verifyPassword } from './auth/password';
 // import { hashPassword } from './auth/password';
-import { generateTokenPair, JWT_CONFIG, updateJWTConfig } from './auth/jwt';
 import type { JWTPayload } from './auth/jwt';
-import { SessionManager } from './auth/session';
+import { generateTokenPair, JWT_CONFIG, updateJWTConfig } from './auth/jwt';
 import { authMiddleware } from './auth/middleware';
+import { SessionManager } from './auth/session';
 // import { patientAuthMiddleware, workerAuthMiddleware } from './auth/middleware';
 
 // APIハンドラーのインポート
-import appointmentHandlers from './api/handlers/appointments';
-import questionnaireHandlers from './api/handlers/questionnaire';
 import adminDoctorHandlers from './api/handlers/admin-doctors';
+import appointmentHandlers from './api/handlers/appointments';
 import chatHandlers from './api/handlers/chat';
-import doctorScheduleHandlers from './api/handlers/doctor-schedule';
-import patientPrescriptionsHandlers from './api/handlers/patient-prescriptions';
 import doctorPatientHandlers from './api/handlers/doctor-patients';
+import doctorScheduleHandlers from './api/handlers/doctor-schedule';
 import operatorAppointmentHandlers from './api/handlers/operator-appointments';
+import patientPrescriptionsHandlers from './api/handlers/patient-prescriptions';
+import questionnaireHandlers from './api/handlers/questionnaire';
 import { videoSessionsApp } from './api/video-sessions';
 
 // Cloudflare Realtime関連のインポート
@@ -62,9 +62,9 @@ type Variables = {
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // API Routes
+import turnApi from './api/turn-credentials';
 import { webSocketSignalingApp } from './api/websocket-signaling';
 import { wsSimpleApp } from './api/websocket-simple';
-import turnApi from './api/turn-credentials';
 
 // データベース接続を環境に応じて初期化
 export function initializeDatabase(env?: Env) {
@@ -1747,20 +1747,19 @@ api.get('/worker/operator/realtime-status', authMiddleware(), async (c) => {
       patientName: row.patients.name,
       doctorId: row.appointments.assignedWorkerId,
       timestamp: row.appointments.updatedAt,
-      message: `${row.patients.name}様 - ${
-        row.appointments.status === 'waiting' ? '待機中' :
+      message: `${row.patients.name}様 - ${row.appointments.status === 'waiting' ? '待機中' :
         row.appointments.status === 'in_progress' ? '診察中' : '診察完了'
-      }`,
+        }`,
     }));
 
     // 緊急アラート
     const waitingCount = waitingStats.length;
     const criticalAlerts = waitingCount > 10
       ? [{
-          type: 'high_load',
-          message: `待機患者が${waitingCount}名を超えています`,
-          severity: 'critical',
-        }]
+        type: 'high_load',
+        message: `待機患者が${waitingCount}名を超えています`,
+        severity: 'critical',
+      }]
       : [];
 
     return c.json({
@@ -2174,14 +2173,57 @@ api.post('/video-sessions/:sessionId/leave', authMiddleware(), async (c) => {
   }
 });
 
-// ビデオセッション終了エンドポイント（医療従事者のみ）
+// 予約情報取得エンドポイント（患者名取得用）
+api.get('/appointments/:appointmentId/details', authMiddleware(), async (c) => {
+  try {
+    const appointmentId = c.req.param('appointmentId');
+    const user = c.get('user');
+    const db = initializeDatabase(c.env);
+
+    if (!db) {
+      return c.json({ error: 'Database not available' }, 500);
+    }
+
+    // 予約情報を取得（患者・医師情報含む）
+    const appointmentResult = await db
+      .select()
+      .from(appointments)
+      .innerJoin(patients, eq(appointments.patientId, patients.id))
+      .leftJoin(workers, eq(appointments.assignedWorkerId, workers.id))
+      .where(eq(appointments.id, parseInt(appointmentId)))
+      .get();
+
+    if (!appointmentResult) {
+      return c.json({ error: 'Appointment not found' }, 404);
+    }
+
+    return c.json({
+      appointment: {
+        id: appointmentResult.appointments.id,
+        patient: {
+          id: appointmentResult.appointments.patientId,
+          name: appointmentResult.patients.name,
+        },
+        doctor: appointmentResult.appointments.assignedWorkerId ? {
+          id: appointmentResult.appointments.assignedWorkerId,
+          name: appointmentResult.workers?.name || '未定',
+        } : null,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching appointment details:', error);
+    return c.json({ error: 'Failed to fetch appointment details' }, 500);
+  }
+});
+
+// ビデオセッション終了エンドポイント（患者・医療従事者両方）
 api.post('/video-sessions/:sessionId/end', authMiddleware(), async (c) => {
   try {
     const sessionId = c.req.param('sessionId');
     const user = c.get('user');
 
-    // 医療従事者のみ終了可能
-    if (user.userType !== 'worker') {
+    // 患者・医療従事者両方が終了可能
+    if (user.userType !== 'patient' && user.userType !== 'worker') {
       return c.json({ error: 'Permission denied' }, 403);
     }
 
