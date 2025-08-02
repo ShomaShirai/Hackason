@@ -6,6 +6,54 @@ import { RequireAuth } from "~/components/auth/RequireAuth"
 import { ErrorMessage } from "~/components/common/ErrorMessage"
 import { getAuthToken } from "../../../utils/auth"
 
+// Web Speech API の型定義
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  start(): void
+  stop(): void
+  abort(): void
+  onresult: ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => any) | null
+  onerror: ((this: SpeechRecognition, ev: SpeechRecognitionErrorEvent) => any) | null
+  onend: ((this: SpeechRecognition, ev: Event) => any) | null
+}
+
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number
+  results: SpeechRecognitionResultList
+}
+
+interface SpeechRecognitionResultList {
+  length: number
+  item(index: number): SpeechRecognitionResult
+  [index: number]: SpeechRecognitionResult
+}
+
+interface SpeechRecognitionResult {
+  isFinal: boolean
+  length: number
+  item(index: number): SpeechRecognitionAlternative
+  [index: number]: SpeechRecognitionAlternative
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string
+  confidence: number
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string
+  message: string
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition: new () => SpeechRecognition
+    webkitSpeechRecognition: new () => SpeechRecognition
+  }
+}
+
 interface TimeSlot {
   startTime: string
   endTime: string
@@ -112,6 +160,11 @@ export default function NewAppointment() {
     comment: string
   } | null>(null)
   const [externalAPIError, setExternalAPIError] = useState<string | null>(null)
+
+  // 音声認識関連の状態
+  const [isListening, setIsListening] = useState(false)
+  const [speechRecognition, setSpeechRecognition] = useState<SpeechRecognition | null>(null)
+  const [speechError, setSpeechError] = useState<string | null>(null)
 
   const isSubmitting = navigation.state === "submitting"
 
@@ -278,6 +331,85 @@ export default function NewAppointment() {
 
   const canSubmit = selectedDoctor && selectedSlot && chiefComplaint.trim()
 
+  // 音声認識の初期化
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition()
+        recognition.continuous = true
+        recognition.interimResults = true
+        recognition.lang = 'ja-JP'
+        
+
+        
+        recognition.onerror = (event) => {
+          console.error('Speech recognition error:', event.error)
+          setSpeechError(`音声認識エラー: ${event.error}`)
+          setIsListening(false)
+        }
+        
+        recognition.onend = () => {
+          setIsListening(false)
+        }
+        
+        // 音声認識の自動停止（5秒間音声がない場合）
+        let silenceTimer: NodeJS.Timeout
+        recognition.onresult = (event) => {
+          // 既存のonresult処理をここに移動
+          let finalTranscript = ''
+          let interimTranscript = ''
+          
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript
+            } else {
+              interimTranscript += transcript
+            }
+          }
+          
+          if (finalTranscript) {
+            // 既存のテキストに追加（改行付き）
+            setChiefComplaint(prev => {
+              const currentText = prev.trim()
+              return currentText ? `${currentText}。${finalTranscript}` : finalTranscript
+            })
+          }
+          
+          // 音声が検出されたらタイマーをリセット
+          clearTimeout(silenceTimer)
+          silenceTimer = setTimeout(() => {
+            if (isListening) {
+              stopListening()
+            }
+          }, 5000) // 5秒間音声がない場合に自動停止
+        }
+        
+        setSpeechRecognition(recognition)
+      } else {
+        setSpeechError('お使いのブラウザは音声認識をサポートしていません')
+      }
+    }
+  }, [])
+
+  // 音声認識開始
+  const startListening = () => {
+    if (speechRecognition) {
+      setSpeechError(null)
+      setIsListening(true)
+      speechRecognition.start()
+    }
+  }
+
+  // 音声認識停止
+  const stopListening = () => {
+    if (speechRecognition) {
+      speechRecognition.stop()
+      setIsListening(false)
+    }
+  }
+
   return (
     <RequireAuth>
       <div className="max-w-6xl mx-auto p-6">
@@ -421,16 +553,71 @@ export default function NewAppointment() {
                   <label htmlFor="chiefComplaint" className="block text-sm font-medium text-gray-700 mb-1">
                     主訴（症状をお聞かせください）
                   </label>
-                  <textarea
-                    id="chiefComplaint"
-                    name="chiefComplaint"
-                    value={chiefComplaint}
-                    onChange={(e) => setChiefComplaint(e.target.value)}
-                    rows={4}
-                    required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="例：3日前から発熱と頭痛があります"
-                  />
+                  
+                  {/* 音声認識エラー表示 */}
+                  {speechError && (
+                    <div className="mb-2 p-2 bg-red-50 border border-red-200 rounded-md">
+                      <p className="text-sm text-red-700">{speechError}</p>
+                    </div>
+                  )}
+                  
+                  <div className="relative">
+                    <textarea
+                      id="chiefComplaint"
+                      name="chiefComplaint"
+                      value={chiefComplaint}
+                      onChange={(e) => setChiefComplaint(e.target.value)}
+                      rows={4}
+                      required
+                      className="w-full px-3 py-2 pr-12 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="例：3日前から発熱と頭痛があります"
+                    />
+                    
+                    {/* 音声認識ボタン */}
+                    <div className="absolute right-2 top-2">
+                      {isListening ? (
+                        <button
+                          type="button"
+                          onClick={stopListening}
+                          className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
+                          title="音声認識を停止"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                          </svg>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={startListening}
+                          disabled={!speechRecognition}
+                          className="p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                          title="音声認識を開始"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                    
+                    {/* 音声認識中のインジケーター */}
+                    {isListening && (
+                      <div className="absolute left-3 top-3">
+                        <div className="flex space-x-1">
+                          <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                          <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0.1s' }}></div>
+                          <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* 音声認識の説明 */}
+                  <div className="mt-2 text-xs text-gray-600">
+                    <p>💡 音声認識ボタンを押して症状を話してください。日本語で話すと自動的に文字に変換されます。</p>
+                  </div>
                   
                   {/* 外部API接続ボタン */}
                   <div className="mt-3">
