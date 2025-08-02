@@ -33,6 +33,7 @@ import patientPrescriptionsHandlers from './api/handlers/patient-prescriptions';
 import doctorPatientHandlers from './api/handlers/doctor-patients';
 import operatorAppointmentHandlers from './api/handlers/operator-appointments';
 import { videoSessionsApp } from './api/video-sessions';
+import symptomAnalysisRouter from './api/external/symptom-analysis';
 
 // Cloudflare Realtime関連のインポート
 import { CloudflareCallsClient } from './realtime/calls-client';
@@ -2223,6 +2224,9 @@ api.route('/worker/doctor/patients', doctorPatientHandlers);
 api.route('/worker/operator/appointments', operatorAppointmentHandlers);
 api.route('/worker/appointments', operatorAppointmentHandlers);
 api.route('/chat', chatHandlers);
+
+// 外部APIルート
+api.route('/external/symptom-analysis', symptomAnalysisRouter);
 
 // APIルートをマウント（React Routerより前に定義して優先度を上げる）
 app.route('/api', api);

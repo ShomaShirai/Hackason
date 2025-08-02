@@ -103,6 +103,15 @@ export default function NewAppointment() {
   const [slots, setSlots] = useState<DoctorSlot[]>([])
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
   const [slotsError, setSlotsError] = useState<string | null>(null)
+  
+  // 外部API関連の状態
+  const [isExternalAPILoading, setIsExternalAPILoading] = useState(false)
+  const [externalAPIResult, setExternalAPIResult] = useState<{
+    recommendedSpecialty: string
+    urgency: 'low' | 'medium' | 'high'
+    comment: string
+  } | null>(null)
+  const [externalAPIError, setExternalAPIError] = useState<string | null>(null)
 
   const isSubmitting = navigation.state === "submitting"
 
@@ -218,6 +227,52 @@ export default function NewAppointment() {
     if (slot.available) {
       setSelectedDoctor(doctorId)
       setSelectedSlot(slot)
+    }
+  }
+
+  // 外部API呼び出し関数
+  const handleExternalAPICall = async () => {
+    if (!chiefComplaint.trim()) {
+      setExternalAPIError('症状を入力してください')
+      return
+    }
+
+    setIsExternalAPILoading(true)
+    setExternalAPIError(null)
+    setExternalAPIResult(null)
+
+    try {
+      // 外部AI API呼び出し（例：Hugging Face、OpenAI等）
+      const response = await fetch('/api/external/symptom-analysis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getAuthToken('/patient')}`,
+        },
+        body: JSON.stringify({
+          symptoms: chiefComplaint,
+          patientContext: {
+            appointmentType,
+            selectedSpecialty
+          }
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('AI分析に失敗しました')
+      }
+
+      const result = await response.json() as {
+        recommendedSpecialty: string
+        urgency: 'low' | 'medium' | 'high'
+        comment: string
+      }
+      setExternalAPIResult(result)
+    } catch (error) {
+      console.error('External API error:', error)
+      setExternalAPIError(error instanceof Error ? error.message : 'AI分析中にエラーが発生しました')
+    } finally {
+      setIsExternalAPILoading(false)
     }
   }
 
@@ -376,6 +431,63 @@ export default function NewAppointment() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="例：3日前から発熱と頭痛があります"
                   />
+                  
+                  {/* 外部API接続ボタン */}
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={handleExternalAPICall}
+                      disabled={!chiefComplaint.trim() || isExternalAPILoading}
+                      className="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {isExternalAPILoading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          AI分析中...
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                          AI症状分析
+                        </>
+                      )}
+                    </button>
+                    
+                    {/* AI分析結果表示 */}
+                    {externalAPIResult && (
+                      <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                        <h4 className="font-medium text-blue-800 mb-2">AI分析結果</h4>
+                        <div className="text-sm text-blue-700">
+                          <div className="mb-2">
+                            <strong>推奨診療科:</strong> {externalAPIResult.recommendedSpecialty}
+                          </div>
+                          <div className="mb-2">
+                            <strong>緊急度:</strong> 
+                            <span className={`ml-1 px-2 py-1 rounded text-xs ${
+                              externalAPIResult.urgency === 'high' ? 'bg-red-100 text-red-800' :
+                              externalAPIResult.urgency === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-green-100 text-green-800'
+                            }`}>
+                              {externalAPIResult.urgency === 'high' ? '高' :
+                               externalAPIResult.urgency === 'medium' ? '中' : '低'}
+                            </span>
+                          </div>
+                          <div>
+                            <strong>分析コメント:</strong> {externalAPIResult.comment}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* エラーメッセージ */}
+                    {externalAPIError && (
+                      <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md">
+                        <p className="text-sm text-red-700">{externalAPIError}</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="bg-gray-50 p-4 rounded-md">
