@@ -1,0 +1,115 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */ {
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "takoyaki",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "main": "./workers/app.ts",
+  "vars": {
+    "VALUE_FROM_CLOUDFLARE": "Hello from Hono/CF",
+    "JWT_SECRET": "YOUR_JWT_SECRET_HERE_MAKE_IT_LONG_AND_SECURE",
+    "JWT_ACCESS_TOKEN_EXPIRY": "3600",
+    "JWT_REFRESH_TOKEN_EXPIRY": "604800",
+    "CF_CALLS_APP_ID": "cc76d619d54422a6cf5c32c26f9ec4ca",
+    "CF_CALLS_APP_SECRET": "344dc3edf44b8a5fa98a42eb7df61448ae86d720712ffaeea42251367bb6efc6"
+  },
+  "observability": {
+    "enabled": true
+  },
+  /**
+   * Smart Placement
+   * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
+   */
+  // "placement": { "mode": "smart" },
+  /**
+   * Bindings
+   * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
+   * databases, object storage, AI inference, real-time communication and more.
+   * https://developers.cloudflare.com/workers/runtime-apis/bindings/
+   */
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "takoyaki-db",
+      "database_id": "186729c3-c2ad-4079-bbca-6d9b3ad70c30",
+      "migrations_dir": "./drizzle"
+    }
+  ],
+  /**
+   * Durable Objects
+   */
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SIGNALING_ROOM",
+        "class_name": "SignalingRoom"
+      }
+    ]
+  },
+  /**
+   * Durable Objects Migrations
+   */
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "SignalingRoom"
+      ]
+    }
+  ],
+  /**
+   * Static Assets
+   */
+  "assets": {
+    "directory": "./build/client",
+    "binding": "ASSETS"
+  },
+  /**
+   * Environment Variables
+   * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
+   */
+  // "vars": { "MY_VARIABLE": "production_value" },
+  /**
+   * Note: Use secrets to store sensitive data.
+   * https://developers.cloudflare.com/workers/configuration/secrets/
+   */
+  /**
+   * Service Bindings (communicate between multiple Workers)
+   * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
+   */
+  // "services": [{ "binding": "MY_SERVICE", "service": "my-service" }]
+  "upload_source_maps": true,
+  /**
+   * Routes configuration (カスタムドメインを使用する場合)
+   * https://developers.cloudflare.com/workers/wrangler/configuration/#routes
+   */
+  // "routes": [
+  //   {
+  //     "pattern": "your-domain.com/*",
+  //     "zone_name": "your-domain.com"
+  //   }
+  // ],
+  /**
+   * Build configuration for development
+   * https://developers.cloudflare.com/workers/wrangler/configuration/#build
+   */
+  "build": {
+    "command": "",
+    "watch_dir": [
+      "workers",
+      "app"
+    ],
+    "upload_source_maps": true
+  },
+  /**
+   * esbuild configuration for source maps
+   */
+  "esbuild": {
+    "sourcemap": true,
+    "keepNames": true
+  }
+}
