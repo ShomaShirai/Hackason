@@ -101,8 +101,7 @@ async function callDifyAPI(message: string, context: any, chatHistory: any[], en
   // チャット履歴を考慮したコンテキスト作成
   let contextualMessage = message
   if (chatHistory.length > 0) {
-    const recentHistory = chatHistory.slice(-3) // 直近3件のやり取りを含める
-    const historyText = recentHistory.map(msg => 
+    const historyText = chatHistory.map(msg => 
       `${msg.isUser ? '患者' : 'AI'}: ${msg.text}`
     ).join('\n')
     contextualMessage = `過去の会話:\n${historyText}\n\n現在の質問: ${message}`
@@ -150,47 +149,8 @@ function parseDifyResponse(difyResponse: any) {
     }
   } catch (error) {
     console.error('Failed to parse Dify response:', error)
-    // フォールバック: テキストから推測
-    const answer = difyResponse.answer || difyResponse.message || ''
-    return parseTextResponse(answer)
+    return {
+      comment: '応答がうまく受け取れませんでした。もう一度お試しください。'
+    }
   }
 }
-
-// テキストレスポンスから情報を抽出
-function parseTextResponse(text: string) {
-  const lowerText = text.toLowerCase()
-  
-  // 診療科の推測
-  let recommendedSpecialty = '内科'
-  if (lowerText.includes('皮膚') || lowerText.includes('かゆみ') || lowerText.includes('湿疹')) {
-    recommendedSpecialty = '皮膚科'
-  } else if (lowerText.includes('耳') || lowerText.includes('鼻') || lowerText.includes('喉')) {
-    recommendedSpecialty = '耳鼻咽喉科'
-  } else if (lowerText.includes('心臓') || lowerText.includes('循環器')) {
-    recommendedSpecialty = '循環器内科'
-  } else if (lowerText.includes('消化器') || lowerText.includes('胃') || lowerText.includes('腸')) {
-    recommendedSpecialty = '消化器内科'
-  } else if (lowerText.includes('呼吸器') || lowerText.includes('肺')) {
-    recommendedSpecialty = '呼吸器内科'
-  } else if (lowerText.includes('神経') || lowerText.includes('脳')) {
-    recommendedSpecialty = '神経内科'
-  } else if (lowerText.includes('救急')) {
-    recommendedSpecialty = '救急科'
-  }
-  
-  // 緊急度の推測
-  let urgency: 'low' | 'medium' | 'high' = 'low'
-  if (lowerText.includes('緊急') || lowerText.includes('救急') || lowerText.includes('すぐに')) {
-    urgency = 'high'
-  } else if (lowerText.includes('早め') || lowerText.includes('推奨') || lowerText.includes('受診')) {
-    urgency = 'medium'
-  }
-  
-  return {
-    recommendedSpecialty,
-    urgency,
-    comment: text || '症状を詳しく診察する必要があります。'
-  }
-}
-
-export default symptomAnalysisRouter 
