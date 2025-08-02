@@ -145,6 +145,8 @@ export default function NewAppointment() {
   const [selectedDoctor, setSelectedDoctor] = useState<number | null>(null)
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null)
   const [chiefComplaint, setChiefComplaint] = useState("")
+  const [chatMessages, setChatMessages] = useState<{id: string, text: string, isUser: boolean, timestamp: Date}[]>([])
+  const [currentInput, setCurrentInput] = useState("")
   const [appointmentType, setAppointmentType] = useState<"initial" | "followup">("initial")
 
   // クライアントサイドでのスロット取得
@@ -154,9 +156,6 @@ export default function NewAppointment() {
   
   // 外部API関連の状態
   const [isExternalAPILoading, setIsExternalAPILoading] = useState(false)
-  const [externalAPIResult, setExternalAPIResult] = useState<{
-    comment: string
-  } | null>(null)
   const [externalAPIError, setExternalAPIError] = useState<string | null>(null)
 
   // 音声認識関連の状態
@@ -281,19 +280,38 @@ export default function NewAppointment() {
     }
   }
 
-  // 外部API呼び出し関数
-  const handleExternalAPICall = async () => {
-    if (!chiefComplaint.trim()) {
-      setExternalAPIError('症状を入力してください')
-      return
+  // メッセージ送信機能
+  const handleSendMessage = async () => {
+    if (!currentInput.trim()) return
+
+    const userMessage = {
+      id: Date.now().toString(),
+      text: currentInput.trim(),
+      isUser: true,
+      timestamp: new Date()
     }
 
+    // ユーザーメッセージをチャットに追加
+    const newChatMessages = [...chatMessages, userMessage]
+    setChatMessages(newChatMessages)
+    
+    // 主訴フィールドも更新（フォーム送信用）
+    setChiefComplaint(newChatMessages.map(msg => `${msg.isUser ? '患者' : 'AI'}: ${msg.text}`).join('\n'))
+    
+    const messageToSend = currentInput.trim()
+    setCurrentInput('')
+    
+    // DIFY APIに送信
+    await handleDIFYAPICall(messageToSend, newChatMessages)
+  }
+
+  // DIFY API呼び出し関数
+  const handleDIFYAPICall = async (message: string, currentChatMessages: typeof chatMessages) => {
     setIsExternalAPILoading(true)
     setExternalAPIError(null)
-    setExternalAPIResult(null)
 
     try {
-      // 外部AI API呼び出し（例：Hugging Face、OpenAI等）
+      // DIFY API呼び出し
       const response = await fetch('/api/external/symptom-analysis', {
         method: 'POST',
         headers: {
@@ -301,7 +319,8 @@ export default function NewAppointment() {
           Authorization: `Bearer ${getAuthToken('/patient')}`,
         },
         body: JSON.stringify({
-          symptoms: chiefComplaint,
+          message: message,
+          chatHistory: currentChatMessages,
           patientContext: {
             appointmentType,
             selectedSpecialty
@@ -316,14 +335,40 @@ export default function NewAppointment() {
       const result = await response.json() as {
         comment: string
       }
-      setExternalAPIResult(result)
+      
+      // AIの応答をチャットに追加
+      const aiMessage = {
+        id: (Date.now() + 1).toString(),
+        text: result.comment,
+        isUser: false,
+        timestamp: new Date()
+      }
+      
+      const updatedMessages = [...currentChatMessages, aiMessage]
+      setChatMessages(updatedMessages)
+      
+      // 主訴フィールドも更新
+      setChiefComplaint(updatedMessages.map(msg => `${msg.isUser ? '患者' : 'AI'}: ${msg.text}`).join('\n'))
+      
     } catch (error) {
-      console.error('External API error:', error)
+      console.error('DIFY API error:', error)
       setExternalAPIError(error instanceof Error ? error.message : 'AI分析中にエラーが発生しました')
+      
+      // エラーメッセージもチャットに追加
+      const errorMessage = {
+        id: (Date.now() + 1).toString(),
+        text: 'すみません、現在AIが応答できません。後ほど再試行してください。',
+        isUser: false,
+        timestamp: new Date()
+      }
+      const updatedMessages = [...currentChatMessages, errorMessage]
+      setChatMessages(updatedMessages)
+      setChiefComplaint(updatedMessages.map(msg => `${msg.isUser ? '患者' : 'AI'}: ${msg.text}`).join('\n'))
     } finally {
       setIsExternalAPILoading(false)
     }
   }
+
 
   const canSubmit = selectedDoctor && selectedSlot && chiefComplaint.trim()
 
@@ -366,10 +411,10 @@ export default function NewAppointment() {
           }
           
           if (finalTranscript) {
-            // 既存のテキストに追加（改行付き）
-            setChiefComplaint(prev => {
+            // チャット入力フィールドに追加
+            setCurrentInput(prev => {
               const currentText = prev.trim()
-              return currentText ? `${currentText}。${finalTranscript}` : finalTranscript
+              return currentText ? `${currentText} ${finalTranscript}` : finalTranscript
             })
           }
           
@@ -546,9 +591,11 @@ export default function NewAppointment() {
                 </div>
 
                 <div>
-                  <label htmlFor="chiefComplaint" className="block text-sm font-medium text-gray-700 mb-1">
-                    主訴（症状をお聞かせください）
-                  </label>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700">
+                      主訴（チャット形式で症状をお聞かせください）
+                    </label>
+                  </div>
                   
                   {/* 音声認識エラー表示 */}
                   {speechError && (
@@ -557,106 +604,139 @@ export default function NewAppointment() {
                     </div>
                   )}
                   
-                  <div className="relative">
-                    <textarea
-                      id="chiefComplaint"
-                      name="chiefComplaint"
-                      value={chiefComplaint}
-                      onChange={(e) => setChiefComplaint(e.target.value)}
-                      rows={4}
-                      required
-                      className="w-full px-3 py-2 pr-12 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="例：3日前から発熱と頭痛があります"
-                    />
-                    
-                    {/* 音声認識ボタン */}
-                    <div className="absolute right-2 top-2">
-                      {isListening ? (
-                        <button
-                          type="button"
-                          onClick={stopListening}
-                          className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
-                          title="音声認識を停止"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
-                          </svg>
-                        </button>
+                  {/* チャット形式の入力 */}
+                  <div className="border border-gray-300 rounded-lg">
+                    {/* チャットメッセージ表示エリア */}
+                    <div className="h-64 overflow-y-auto p-4 bg-gray-50">
+                      {chatMessages.length === 0 ? (
+                        <div className="text-center text-gray-500 mt-8">
+                          <p>問診を開始します。症状についてお話しください。</p>
+                        </div>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={startListening}
-                          disabled={!speechRecognition}
-                          className="p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-                          title="音声認識を開始"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                          </svg>
-                        </button>
+                        <div className="space-y-3">
+                          {chatMessages.map((message) => (
+                            <div
+                              key={message.id}
+                              className={`flex ${
+                                message.isUser ? "justify-end" : "justify-start"
+                              }`}
+                            >
+                              <div
+                                className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                                  message.isUser
+                                    ? "bg-blue-500 text-white"
+                                    : "bg-white border border-gray-200 text-gray-800"
+                                }`}
+                              >
+                                <p className="text-sm">{message.text}</p>
+                                <p className={`text-xs mt-1 ${
+                                  message.isUser ? "text-blue-100" : "text-gray-500"
+                                }`}>
+                                  {message.timestamp.toLocaleTimeString('ja-JP', { 
+                                    hour: '2-digit', 
+                                    minute: '2-digit' 
+                                  })}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* AI応答中のローディング表示 */}
+                      {isExternalAPILoading && (
+                        <div className="flex justify-start">
+                          <div className="bg-white border border-gray-200 px-4 py-2 rounded-lg">
+                            <div className="flex items-center space-x-2">
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                              <span className="text-sm text-gray-600">AIが応答を作成中...</span>
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
                     
-                    {/* 音声認識中のインジケーター */}
-                    {isListening && (
-                      <div className="absolute left-3 top-3">
-                        <div className="flex space-x-1">
-                          <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-                          <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0.1s' }}></div>
-                          <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* 音声認識の説明 */}
-                  <div className="mt-2 text-xs text-gray-600">
-                    <p>💡 音声認識ボタンを押して症状を話してください。日本語で話すと自動的に文字に変換されます。</p>
-                  </div>
-                  
-                  {/* 外部API接続ボタン */}
-                  <div className="mt-3">
-                    <button
-                      type="button"
-                      onClick={handleExternalAPICall}
-                      disabled={!chiefComplaint.trim() || isExternalAPILoading}
-                      className="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
-                    >
-                      {isExternalAPILoading ? (
-                        <>
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                          AI分析中...
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                          </svg>
-                          AI症状分析
-                        </>
-                      )}
-                    </button>
-                    
-                    {/* AI分析結果表示 */}
-                    {externalAPIResult && (
-                      <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                        <h4 className="font-medium text-blue-800 mb-2">AI分析結果</h4>
-                        <div className="text-sm text-blue-700">
-                          <div>
-                            <strong>分析コメント:</strong> {externalAPIResult.comment}
+                    {/* メッセージ入力エリア */}
+                    <div className="border-t border-gray-300 p-4">
+                      <div className="flex gap-2">
+                        <div className="flex-1 relative">
+                          <input
+                            type="text"
+                            value={currentInput}
+                            onChange={(e) => setCurrentInput(e.target.value)}
+                            onKeyPress={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault()
+                                handleSendMessage()
+                              }
+                            }}
+                            placeholder="症状や気になることを入力してください..."
+                            className="w-full px-3 py-2 pr-12 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            disabled={isExternalAPILoading}
+                          />
+                          
+                          {/* 音声認識ボタン（チャット内） */}
+                          <div className="absolute right-2 top-2">
+                            {isListening ? (
+                              <button
+                                type="button"
+                                onClick={stopListening}
+                                className="p-1 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
+                                title="音声認識を停止"
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                                </svg>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={startListening}
+                                disabled={!speechRecognition || isExternalAPILoading}
+                                className="p-1 bg-blue-500 text-white rounded-full hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                                title="音声認識を開始"
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                </svg>
+                              </button>
+                            )}
                           </div>
                         </div>
+                        
+                        <button
+                          type="button"
+                          onClick={handleSendMessage}
+                          disabled={!currentInput.trim() || isExternalAPILoading}
+                          className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                          </svg>
+                          送信
+                        </button>
                       </div>
-                    )}
-                    
-                    {/* エラーメッセージ */}
-                    {externalAPIError && (
-                      <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md">
-                        <p className="text-sm text-red-700">{externalAPIError}</p>
-                      </div>
-                    )}
+                      
+                      {/* 音声認識中のインジケーター */}
+                      {isListening && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <div className="flex space-x-1">
+                            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0.1s' }}></div>
+                            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                          </div>
+                          <span className="text-sm text-red-600">音声認識中...</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
+                  
+                  {/* チャットモード用のエラーメッセージ */}
+                  {externalAPIError && (
+                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md">
+                      <p className="text-sm text-red-700">{externalAPIError}</p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="bg-gray-50 p-4 rounded-md">
