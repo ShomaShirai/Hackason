@@ -589,7 +589,7 @@ export default function NewAppointment() {
                         <p className="text-sm text-gray-600 mb-2">カメラ映像</p>
                       </div>
 
-                      <div className="relative bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-300 mx-auto" style={{ maxWidth: '500px' }}>
+                      <div className="relative bg-gray-900 rounded-lg overflow-hidden border-4 border-blue-300 mx-auto" style={{ maxWidth: '500px' }}>
                         <video
                           ref={videoRef}
                           autoPlay
@@ -605,6 +605,32 @@ export default function NewAppointment() {
                           ref={canvasRef}
                           className="hidden"
                         />
+
+                        {/* より目立つインジケーター */}
+                        <div className="absolute top-4 left-4 bg-green-500 text-white px-3 py-1 rounded-full text-sm font-bold">
+                          {cameraStream ? '🟢 カメラON' : '🔴 カメラOFF'}
+                        </div>
+
+                        {cameraStream && (
+                          <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-bold animate-pulse">
+                            ● 録画中
+                          </div>
+                        )}
+
+                        {/* 再生ボタン（必要に応じて） */}
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (videoRef.current) {
+                                videoRef.current.play().catch(console.error)
+                              }
+                            }}
+                            className="bg-blue-500 text-white p-4 rounded-full opacity-75 hover:opacity-100"
+                          >
+                            ▶️
+                          </button>
+                        </div>
                       </div>
 
                       <div className="flex justify-center gap-4">
@@ -624,6 +650,16 @@ export default function NewAppointment() {
                         >
                           キャンセル
                         </button>
+                      </div>
+
+                      {/* デバッグ情報 */}
+                      <div className="bg-gray-100 p-3 rounded text-xs text-gray-600 space-y-1">
+                        <div><strong>状態:</strong> カメラストリーム: {cameraStream ? 'アクティブ' : '待機中'}</div>
+                        <div><strong>要素:</strong> ビデオ要素: {videoRef.current ? '存在' : '未初期化'}</div>
+                        {videoRef.current && (
+                          <div><strong>サイズ:</strong> {videoRef.current.videoWidth || 0}x{videoRef.current.videoHeight || 0}</div>
+                        )}
+                        <div><strong>時刻:</strong> {new Date().toLocaleTimeString()}</div>
                       </div>
                     </div>
                   )}
