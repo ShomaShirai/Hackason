@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react"
-import { useLoaderData, useNavigation } from "react-router"
+import { useLoaderData } from "react-router"
 import { RequireAuth } from "~/components/auth/RequireAuth"
 import { ErrorMessage } from "~/components/common/ErrorMessage"
 import { Loading } from "~/components/common/Loading"
@@ -19,9 +19,89 @@ interface DoctorSlot {
   timeSlots: TimeSlot[]
 }
 
+// 25行目付近のインターフェースを以下に置き換え
+interface TongueDiagnosisResult {
+  // 基本的な舌診結果（既存の構造）
+  color?: {
+    primary: string;
+    secondary: string;
+    confidence: number;
+  };
+  coating?: {
+    thickness: string;
+    color: string;
+    distribution: string;
+    confidence: number;
+  };
+  texture?: {
+    moisture: string;
+    cracks: string;
+    spots: string;
+    confidence: number;
+  };
+  shape?: {
+    size: string;
+    edges: string;
+    tip: string;
+    confidence: number;
+  };
+  overallAssessment?: {
+    constitution: string;
+    severity: string;
+    recommendations: string[];
+    confidence: number;
+  };
+  analysisTimestamp?: string;
+
+  // ✅ 生成AI（TongueDiagnosisService）からのレスポンス構造を追加
+  overall_assessment?: string;
+  tongue_color?: string;
+  tongue_coating?: string;
+  tongue_shape?: string;
+  moisture_level?: string;
+  constitutional_type?: string;
+  recommended_treatment?: string;
+  dietary_recommendations?: string;
+  lifestyle_advice?: string;
+  urgency_level?: 'low' | 'medium' | 'high';
+  confidence_score?: number;
+  analyzed_at?: string;
+}
+
+interface DiagnosisResponse {
+  success: boolean;
+  analysis: TongueDiagnosisResult;
+  message: string;
+  imageUrl?: string;
+  timestamp?: string;
+
+  // ✅ 追加プロパティ
+  aiProvider?: string;
+  warning?: string;
+}
+
+interface AppointmentResponse {
+  appointment: {
+    id: number;
+    patientId: number;
+    doctorId: number;
+    scheduledAt: string;
+    durationMinutes: number;
+    status: string;
+    appointmentType: string;
+    chiefComplaint: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+}
+
+interface ErrorResponse {
+  error: string;
+  details?: string;
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url)
-  // JSTで現在日付を取得
   const getCurrentJstDate = () => {
     const now = new Date()
     const jstDate = new Date(now.getTime() + 9 * 60 * 60 * 1000)
@@ -31,7 +111,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   const date = url.searchParams.get("date") || getCurrentJstDate()
   const specialty = url.searchParams.get("specialty") || ""
 
-  // サーバーサイドでは初期データのみ返し、クライアントサイドでAPIを呼び出す
   return { slots: [], date, specialty, needsClientSideLoad: true }
 }
 
@@ -49,7 +128,6 @@ export async function action({ request }: Route.ActionArgs) {
   const chiefComplaint = formData.get("chiefComplaint") as string
 
   try {
-    // サーバーサイドでは、リクエストから認証情報を転送
     const authHeader = request.headers.get("Authorization")
     const cookie = request.headers.get("Cookie")
 
@@ -71,14 +149,13 @@ export async function action({ request }: Route.ActionArgs) {
     })
 
     if (!response.ok) {
-      const errorData = await response.json() as any
+      const errorData = await response.json() as ErrorResponse
       return Response.json(
         { error: errorData.error || "予約の作成に失敗しました" },
         { status: response.status }
       )
     }
 
-    await response.json() // レスポンスを消費
     return Response.redirect("/patient/appointments?created=true")
   } catch (err: any) {
     console.error("Error creating appointment:", err)
@@ -91,7 +168,8 @@ export async function action({ request }: Route.ActionArgs) {
 
 export default function NewAppointment() {
   const { date, specialty, needsClientSideLoad } = useLoaderData<typeof loader>()
-  const navigation = useNavigation()
+
+  // 基本状態
   const [selectedDate, setSelectedDate] = useState(date)
   const [selectedSpecialty, setSelectedSpecialty] = useState(specialty)
   const [selectedDoctor, setSelectedDoctor] = useState<number | null>(null)
@@ -99,21 +177,25 @@ export default function NewAppointment() {
   const [chiefComplaint, setChiefComplaint] = useState("")
   const [appointmentType, setAppointmentType] = useState<"initial" | "followup">("initial")
 
-  // カメラ関連の状態を追加
+  // カメラ関連状態
   const [capturedImage, setCapturedImage] = useState<string | null>(null)
   const [isCameraOpen, setIsCameraOpen] = useState(false)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  // クライアントサイドでのスロット取得
+  // 舌診関連状態
+  const [tongueAnalysisResult, setTongueAnalysisResult] = useState<TongueDiagnosisResult | null>(null)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+
+  // スロット取得関連状態
   const [slots, setSlots] = useState<DoctorSlot[]>([])
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
   const [slotsError, setSlotsError] = useState<string | null>(null)
 
-  const isSubmitting = navigation.state === "submitting"
 
-  // 診療科リスト（実際はAPIから取得）
+  // 診療科リスト
   const specialties = [
     { value: "", label: "すべて" },
     { value: "内科", label: "内科" },
@@ -121,8 +203,7 @@ export default function NewAppointment() {
     { value: "皮膚科", label: "皮膚科" },
     { value: "耳鼻咽喉科", label: "耳鼻咽喉科" },
   ]
-
-  // クライアントサイドでのスロット取得関数
+  // スロット取得関数の修正
   const fetchAvailableSlots = async (searchDate: string, searchSpecialty: string) => {
     setIsLoadingSlots(true)
     setSlotsError(null)
@@ -132,6 +213,8 @@ export default function NewAppointment() {
       if (!token) {
         throw new Error('認証トークンが見つかりません')
       }
+
+      console.log('🔍 スロット検索:', { searchDate, searchSpecialty })
 
       const response = await fetch(
         `/api/patient/appointments/available-slots?date=${searchDate}&specialty=${searchSpecialty}`,
@@ -143,27 +226,435 @@ export default function NewAppointment() {
       )
 
       if (!response.ok) {
-        throw new Error("スロット情報の取得に失敗しました")
+        const errorData = await response.json() as ErrorResponse
+        throw new Error(errorData.error || "スロット情報の取得に失敗しました")
       }
 
-      const data = await response.json() as any
-      setSlots(data.slots || [])
+      const data = await response.json() as {
+        availableSlots?: { time: string; available: boolean }[];
+        slots?: DoctorSlot[];
+      }
+
+      console.log('📊 取得したスロットデータ:', data)
+
+      // レスポンスに応じてスロットを設定
+      if (data.slots && data.slots.length > 0) {
+        // 正式なスロットデータが返された場合
+        console.log('✅ 正式スロットデータを使用')
+        setSlots(data.slots)
+      } else if (data.availableSlots && data.availableSlots.length > 0) {
+        // モックデータの場合は変換
+        console.log('🔄 モックデータを変換中...')
+        const mockSlots: DoctorSlot[] = [
+          {
+            doctorId: 1,
+            doctorName: "田中医師",
+            specialty: searchSpecialty || "内科",
+            timeSlots: data.availableSlots.map(slot => ({
+              startTime: slot.time,
+              endTime: slot.time.replace(/(\d{2}):(\d{2})/, (_, h, m) => {
+                const hour = parseInt(h);
+                const minute = parseInt(m) + 30;
+                return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+              }),
+              available: slot.available
+            }))
+          }
+        ];
+        console.log('✅ モックスロット変換完了:', mockSlots)
+        setSlots(mockSlots);
+      } else {
+        // データがない場合
+        console.log('⚠️ 利用可能なスロットなし')
+        setSlots([]);
+        setSlotsError('指定された日時に利用可能なスロットがありません。');
+      }
     } catch (err: any) {
-      console.error("Error loading available slots:", err)
+      console.error("❌ スロット取得エラー:", err)
       setSlotsError(err instanceof Error ? err.message : "スロット情報の取得に失敗しました")
       setSlots([])
     } finally {
       setIsLoadingSlots(false)
     }
   }
+  // 280行目付近のperformTongueDiagnosis関数を修正
+  const performTongueDiagnosis = async (imageData: string) => {
+    console.log('🔍 舌診分析実行中...')
+    console.log('📊 送信データ:', {
+      imageDataLength: imageData.length,
+      imageDataPreview: imageData.substring(0, 50) + '...',
+      symptoms: chiefComplaint,
+      timestamp: new Date().toISOString()
+      // ✅ appointmentIdを完全削除
+    })
 
-  // 初回ロード時にスロットを取得
-  useEffect(() => {
-    if (needsClientSideLoad && selectedDate) {
-      fetchAvailableSlots(selectedDate, selectedSpecialty)
+    setSlotsError('📸 写真撮影完了！生成AIで舌診分析を開始しています...')
+    setIsAnalyzing(true)
+
+    try {
+      const token = getAuthToken('/patient')
+      if (!token) {
+        throw new Error('認証トークンが見つかりません')
+      }
+
+      console.log('🔐 認証トークン確認:', token.substring(0, 20) + '...')
+
+      // ✅ appointmentIdを完全削除したrequestBody
+      const requestBody = {
+        imageData: imageData,
+        symptoms: chiefComplaint,
+        timestamp: new Date().toISOString()
+        // appointmentId は削除
+      }
+
+      console.log('📤 リクエスト送信開始:', {
+        url: '/api/tongue-diagnosis',
+        method: 'POST',
+        bodySize: JSON.stringify(requestBody).length,
+        hasSymptoms: !!chiefComplaint
+      })
+
+      const diagnosisResponse = await fetch('/api/tongue-diagnosis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(requestBody)
+      })
+
+      console.log('🔍 舌診レスポンス状態:', {
+        status: diagnosisResponse.status,
+        statusText: diagnosisResponse.statusText
+      })
+
+      if (!diagnosisResponse.ok) {
+        const errorText = await diagnosisResponse.text()
+        console.error('❌ 舌診分析API失敗:', {
+          status: diagnosisResponse.status,
+          statusText: diagnosisResponse.statusText,
+          errorBody: errorText
+        })
+        throw new Error(`舌診分析に失敗しました: ${diagnosisResponse.status} ${errorText}`)
+      }
+
+      const diagnosisData = await diagnosisResponse.json() as DiagnosisResponse
+      console.log('✅ 舌診分析データ:', {
+        success: diagnosisData.success,
+        confidence: diagnosisData.analysis?.confidence_score,
+        urgency: diagnosisData.analysis?.urgency_level,
+        constitution: diagnosisData.analysis?.constitutional_type,
+        aiProvider: diagnosisData.aiProvider || 'unknown'
+      })
+
+      if (!diagnosisData.success) {
+        throw new Error(`舌診分析エラー: ${diagnosisData.message}`)
+      }
+
+      setTongueAnalysisResult(diagnosisData.analysis)
+      console.log('✅ 舌診分析完了！結果を保存しました')
+
+      if (diagnosisData.warning) {
+        setSlotsError(`⚠️ ${diagnosisData.message}`)
+      } else {
+        setSlotsError('✅ 生成AIによる舌診分析が完了しました。予約を確定できます。')
+      }
+
+    } catch (error) {
+      console.error('❌ 舌診分析失敗:', error)
+      setSlotsError(`舌診分析に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`)
+      setCapturedImage(null)
+      setTongueAnalysisResult(null)
+    } finally {
+      setIsAnalyzing(false)
     }
-  }, [needsClientSideLoad, selectedDate, selectedSpecialty])
+  }
 
+  // カメラを開く関数
+  const openCamera = async () => {
+    console.log("🎥 カメラ起動を開始...")
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      console.error("❌ このブラウザはgetUserMediaをサポートしていません")
+      setSlotsError("このブラウザはカメラ機能をサポートしていません。")
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false
+      })
+
+      console.log("✅ カメラストリーム取得成功:", stream)
+      setCameraStream(stream)
+      setIsCameraOpen(true)
+
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          videoRef.current.play().catch(console.error)
+        }
+      }, 200)
+
+    } catch (error) {
+      console.error("❌ カメラアクセス失敗:", error)
+      let errorMessage = "カメラにアクセスできませんでした。"
+
+      if (error instanceof Error) {
+        switch (error.name) {
+          case 'NotAllowedError':
+            errorMessage += " カメラの使用許可を与えてください。"
+            break
+          case 'NotFoundError':
+            errorMessage += " カメラデバイスが見つかりませんでした。"
+            break
+          case 'NotReadableError':
+            errorMessage += " カメラが他のアプリケーションで使用中です。"
+            break
+          default:
+            errorMessage += ` エラー: ${error.message}`
+        }
+      }
+      setSlotsError(errorMessage)
+    }
+  }
+
+  // カメラを閉じる関数
+  const closeCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop())
+      setCameraStream(null)
+    }
+    setIsCameraOpen(false)
+  }
+
+  // 写真撮影 + 舌診開始関数
+  const takePhoto = async () => {
+    console.log('📸 写真撮影開始...')
+
+    if (videoRef.current && canvasRef.current) {
+      const canvas = canvasRef.current
+      const video = videoRef.current
+
+      console.log('📐 ビデオサイズ:', {
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        readyState: video.readyState,
+        currentTime: video.currentTime,
+        paused: video.paused,
+        ended: video.ended
+      })
+
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        ctx.drawImage(video, 0, 0)
+        const imageDataUrl = canvas.toDataURL('image/png')
+
+        console.log('🖼️ 画像データ生成:', {
+          dataUrlLength: imageDataUrl.length,
+          format: imageDataUrl.substring(0, 30) + '...',
+          canvasSize: `${canvas.width}x${canvas.height}`,
+          isValidDataUrl: imageDataUrl.startsWith('data:image/')
+        })
+
+        setCapturedImage(imageDataUrl)
+        closeCamera()
+
+        // 🔥 舌診を即座に開始
+        console.log('📸 写真撮影完了 - 舌診分析を開始します')
+
+        try {
+          await performTongueDiagnosis(imageDataUrl)
+        } catch (error) {
+          console.error('❌ takePhoto内での舌診分析エラー:', error)
+          setSlotsError(`舌診分析に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`)
+        }
+      } else {
+        console.error('❌ Canvas context取得失敗')
+        setSlotsError('画像の処理に失敗しました。もう一度お試しください。')
+      }
+    } else {
+      console.error('❌ Video または Canvas 要素が見つかりません:', {
+        video: !!videoRef.current,
+        canvas: !!canvasRef.current,
+        videoElement: videoRef.current,
+        canvasElement: canvasRef.current
+      })
+      setSlotsError('カメラまたはキャンバス要素が見つかりません。')
+    }
+  }
+
+  // 撮影した写真を削除する関数
+  const deleteImage = () => {
+    setCapturedImage(null)
+    setTongueAnalysisResult(null)
+  }
+
+  // 予約作成関数
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedDoctor || !selectedSlot || !chiefComplaint.trim()) {
+      return
+    }
+
+    // 舌診結果がある場合は必須チェック
+    if (capturedImage && !tongueAnalysisResult) {
+      setSlotsError('舌診分析が完了していません。写真を撮り直すか、しばらくお待ちください。')
+      return
+    }
+
+    setSlotsError(null)
+    setIsProcessing(true)
+
+    try {
+      const token = getAuthToken('/patient')
+      if (!token) {
+        throw new Error('認証トークンが見つかりません')
+      }
+
+      console.log('🔄 予約作成開始...', {
+        doctorId: selectedDoctor,
+        appointmentDate: selectedDate,
+        startTime: selectedSlot.startTime,
+        endTime: selectedSlot.endTime,
+        appointmentType,
+        chiefComplaint: chiefComplaint.substring(0, 50) + '...',
+        hasImage: !!capturedImage,
+        hasTongueAnalysis: !!tongueAnalysisResult,
+        tongueAnalysisConfidence: tongueAnalysisResult?.confidence_score
+      })
+
+      setSlotsError('予約作成中です...')
+
+      // ✅ 舌診結果を予約作成リクエストに含める
+      const requestBody = {
+        doctorId: selectedDoctor,
+        appointmentDate: selectedDate,
+        startTime: selectedSlot.startTime,
+        endTime: selectedSlot.endTime,
+        appointmentType,
+        chiefComplaint,
+        hasImage: !!capturedImage,
+        tongueAnalysis: tongueAnalysisResult, // ✅ 舌診結果を含める
+        imageData: capturedImage // ✅ 画像データも含める（オプション）
+      }
+
+      const response = await fetch('/api/patient/appointments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(requestBody),
+      })
+
+      console.log('📋 予約作成レスポンス:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json() as ErrorResponse
+        console.error('❌ 予約作成失敗:', errorData)
+
+        if (errorData.error?.includes('すでに予約があります') ||
+          errorData.error?.includes('time slot is already taken')) {
+          setSlotsError('選択された時間帯は既に予約済みです。最新の空き時間を確認してください。')
+          await fetchAvailableSlots(selectedDate, selectedSpecialty)
+          setSelectedDoctor(null)
+          setSelectedSlot(null)
+          return
+        }
+
+        throw new Error(errorData.error || '予約の作成に失敗しました')
+      }
+
+      const appointmentData = await response.json() as AppointmentResponse & { tongueAnalysisSaved?: boolean }
+      console.log('✅ 予約作成成功:', {
+        appointmentId: appointmentData.appointment.id,
+        tongueAnalysisSaved: appointmentData.tongueAnalysisSaved
+      })
+
+      console.log('✅ 全処理完了')
+
+      if (appointmentData.tongueAnalysisSaved) {
+        setSlotsError('予約と舌診結果の保存が完了しました！')
+      } else {
+        setSlotsError('予約が完了しました！')
+      }
+
+      setTimeout(() => {
+        window.location.href = '/patient/appointments?created=true'
+      }, 1000)
+
+    } catch (err: any) {
+      console.error("❌ 予約作成エラー:", err)
+      setSlotsError(err instanceof Error ? err.message : "予約の作成中にエラーが発生しました")
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  // デバッグ用: 舌診エンドポイントのテスト関数（開発時のみ使用）
+  const testTongueEndpoint = async () => {
+    console.log('🧪 舌診エンドポイントテスト開始')
+
+    try {
+      const token = getAuthToken('/patient')
+
+      // まずは認証なしでテスト
+      const testResponse = await fetch('/api/test-tongue-diagnosis', {
+        method: 'GET'
+      })
+
+      console.log('🧪 テストエンドポイント:', {
+        status: testResponse.status,
+        ok: testResponse.ok
+      })
+
+      if (testResponse.ok) {
+        const testData = await testResponse.json()
+        console.log('✅ テストエンドポイント成功:', testData)
+      }
+
+      // 認証ありでテスト（小さなデータ）
+      const authTestResponse = await fetch('/api/tongue-diagnosis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          appointmentId: 1,
+          imageData: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', // 1x1ピクセルの透明画像
+          timestamp: new Date().toISOString()
+        })
+      })
+
+      console.log('🧪 認証テスト:', {
+        status: authTestResponse.status,
+        ok: authTestResponse.ok
+      })
+
+    } catch (error) {
+      console.error('❌ エンドポイントテスト失敗:', error)
+    }
+  }
+
+  // 開発時のみ: コンポーネントマウント時にテスト実行
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      // 5秒後にテスト実行（初期化完了を待つ）
+      setTimeout(testTongueEndpoint, 5000)
+    }
+  }, [])
+
+  // イベントハンドラー
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSelectedDate(e.target.value)
     setSelectedDoctor(null)
@@ -180,174 +671,27 @@ export default function NewAppointment() {
     fetchAvailableSlots(selectedDate, selectedSpecialty)
   }
 
-  // カメラを開く関数 - 強化デバッグ版
-  const openCamera = async () => {
-    console.log("🎥 カメラ起動を開始...")
-
-    // まず利用可能なメディアデバイスを確認
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices()
-      const videoDevices = devices.filter(device => device.kind === 'videoinput')
-      console.log("📷 利用可能なカメラデバイス数:", videoDevices.length)
-      console.log("📷 カメラデバイス詳細:", videoDevices)
-    } catch (enumError) {
-      console.error("❌ デバイス列挙エラー:", enumError)
-    }
-
-    // ブラウザがgetUserMediaをサポートしているか確認
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      console.error("❌ このブラウザはgetUserMediaをサポートしていません")
-      setSlotsError("このブラウザはカメラ機能をサポートしていません。")
-      return
-    }
-
-    console.log("✅ getUserMedia APIサポート確認済み")
-
-    try {
-      // よりシンプルな設定で試行
-      console.log("🔄 カメラストリーム取得中...")
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: false
-      })
-
-      console.log("✅ カメラストリーム取得成功:", stream)
-      console.log("📹 ビデオトラック数:", stream.getVideoTracks().length)
-
-      if (stream.getVideoTracks().length === 0) {
-        console.error("❌ ビデオトラックが見つかりません")
-        setSlotsError("カメラのビデオトラックが見つかりませんでした。")
-        return
-      }
-
-      const videoTrack = stream.getVideoTracks()[0]
-      console.log("📊 ビデオトラック設定:", videoTrack.getSettings())
-
-      setCameraStream(stream)
-      setIsCameraOpen(true)
-
-      // ビデオ要素への設定を確実に行う
-      setTimeout(() => {
-        console.log("🖥️ ビデオ要素確認...")
-
-        if (!videoRef.current) {
-          console.error("❌ ビデオ要素が見つかりません")
-          setSlotsError("ビデオ要素の初期化に失敗しました。")
-          return
-        }
-
-        console.log("✅ ビデオ要素発見:", videoRef.current)
-        console.log("🔗 ストリーム設定中...")
-
-        videoRef.current.srcObject = stream
-
-        // イベントリスナーを追加
-        videoRef.current.onloadedmetadata = () => {
-          console.log("📊 メタデータ読み込み完了")
-          console.log("📐 ビデオサイズ:", videoRef.current?.videoWidth, "x", videoRef.current?.videoHeight)
-        }
-
-        videoRef.current.oncanplay = () => {
-          console.log("🎬 再生可能状態")
-        }
-
-        videoRef.current.onplay = () => {
-          console.log("▶️ 再生開始")
-        }
-
-        videoRef.current.onerror = (error) => {
-          console.error("❌ ビデオ要素エラー:", error)
-        }
-
-        // 再生開始
-        videoRef.current.play()
-          .then(() => {
-            console.log("✅ ビデオ再生開始成功")
-          })
-          .catch(error => {
-            console.error("❌ ビデオ再生失敗:", error)
-            console.log("🔄 ユーザー操作後に再試行してください")
-          })
-      }, 200)
-
-    } catch (error) {
-      console.error("❌ カメラアクセス失敗:", error)
-
-      let errorMessage = "カメラにアクセスできませんでした。"
-
-      if (error instanceof Error) {
-        console.log("🔍 エラー詳細:")
-        console.log("- 名前:", error.name)
-        console.log("- メッセージ:", error.message)
-        console.log("- スタック:", error.stack)
-
-        switch (error.name) {
-          case 'NotAllowedError':
-            errorMessage += " カメラの使用許可を与えてください。ブラウザのアドレスバー左側のカメラアイコンをクリックして許可してください。"
-            break
-          case 'NotFoundError':
-            errorMessage += " カメラデバイスが見つかりませんでした。"
-            break
-          case 'NotReadableError':
-            errorMessage += " カメラが他のアプリケーションで使用中です。"
-            break
-          case 'OverconstrainedError':
-            errorMessage += " カメラの設定要求が対応していません。"
-            break
-          case 'SecurityError':
-            errorMessage += " セキュリティエラーです。HTTPSでアクセスしてください。"
-            break
-          default:
-            errorMessage += ` エラー: ${error.message}`
-        }
-      }
-
-      setSlotsError(errorMessage)
+  const handleSlotSelect = (doctorId: number, slot: TimeSlot) => {
+    if (slot.available) {
+      setSelectedDoctor(doctorId)
+      setSelectedSlot(slot)
     }
   }
 
-  // カメラを閉じる関数
-  const closeCamera = () => {
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(track => track.stop())
-      setCameraStream(null)
+  // 予約ボタンの有効/無効条件
+  const canSubmit = selectedDoctor &&
+    selectedSlot &&
+    chiefComplaint.trim() &&
+    !isProcessing &&
+    !isAnalyzing &&
+    (!capturedImage || tongueAnalysisResult)
+
+  // 初回ロード時にスロットを取得
+  useEffect(() => {
+    if (needsClientSideLoad && selectedDate) {
+      fetchAvailableSlots(selectedDate, selectedSpecialty)
     }
-    setIsCameraOpen(false)
-  }
-
-  // 写真を撮影する関数
-  const takePhoto = () => {
-    if (videoRef.current && canvasRef.current) {
-      const canvas = canvasRef.current
-      const video = videoRef.current
-
-      canvas.width = video.videoWidth
-      canvas.height = video.videoHeight
-
-      const ctx = canvas.getContext('2d')
-      if (ctx) {
-        ctx.drawImage(video, 0, 0)
-        const imageDataUrl = canvas.toDataURL('image/png')
-        setCapturedImage(imageDataUrl)
-        closeCamera()
-      }
-    }
-  }
-
-  // 撮影した写真を削除する関数
-  const deleteImage = () => {
-    setCapturedImage(null)
-  }
-
-  // ビデオ要素のロード完了を監視
-  const handleVideoLoadedMetadata = () => {
-    console.log("📊 ビデオメタデータ読み込み完了")
-    if (videoRef.current) {
-      const video = videoRef.current
-      console.log(`📐 ビデオサイズ: ${video.videoWidth}x${video.videoHeight}`)
-      video.play().catch(console.error)
-    }
-  }
+  }, [needsClientSideLoad, selectedDate, selectedSpecialty])
 
   // コンポーネントがアンマウントされる時にカメラを停止
   useEffect(() => {
@@ -357,57 +701,6 @@ export default function NewAppointment() {
       }
     }
   }, [cameraStream])
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!selectedDoctor || !selectedSlot || !chiefComplaint.trim()) { return }
-
-    setSlotsError(null)
-
-    try {
-      const token = getAuthToken('/patient')
-      if (!token) {
-        throw new Error('認証トークンが見つかりません')
-      }
-
-      const response = await fetch('/api/patient/appointments', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          doctorId: selectedDoctor,
-          appointmentDate: selectedDate,
-          startTime: selectedSlot.startTime,
-          endTime: selectedSlot.endTime,
-          appointmentType,
-          chiefComplaint,
-          image: capturedImage, // 撮影した画像を追加
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json() as any
-        throw new Error(errorData.error || '予約の作成に失敗しました')
-      }
-
-      // 成功時は予約一覧ページにリダイレクト
-      window.location.href = '/patient/appointments?created=true'
-    } catch (err: any) {
-      console.error('Error creating appointment:', err)
-      setSlotsError(err.message || '予約の作成中にエラーが発生しました')
-    }
-  }
-
-  const handleSlotSelect = (doctorId: number, slot: TimeSlot) => {
-    if (slot.available) {
-      setSelectedDoctor(doctorId)
-      setSelectedSlot(slot)
-    }
-  }
-
-  const canSubmit = selectedDoctor && selectedSlot && chiefComplaint.trim()
 
   return (
     <RequireAuth>
@@ -566,7 +859,7 @@ export default function NewAppointment() {
                 {/* カメラ機能セクション */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    症状の写真（任意・1枚のみ）
+                    舌の写真（任意・診断の参考資料として使用されます）
                   </label>
 
                   {!capturedImage && !isCameraOpen && (
@@ -579,14 +872,14 @@ export default function NewAppointment() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                       </svg>
-                      カメラを起動
+                      舌の写真を撮る
                     </button>
                   )}
 
                   {isCameraOpen && (
                     <div className="space-y-4">
                       <div className="text-center">
-                        <p className="text-sm text-gray-600 mb-2">カメラ映像</p>
+                        <p className="text-sm text-gray-600 mb-2">舌を画面中央に映して撮影してください</p>
                       </div>
 
                       <div className="relative bg-gray-900 rounded-lg overflow-hidden border-4 border-blue-300 mx-auto" style={{ maxWidth: '500px' }}>
@@ -606,7 +899,6 @@ export default function NewAppointment() {
                           className="hidden"
                         />
 
-                        {/* より目立つインジケーター */}
                         <div className="absolute top-4 left-4 bg-green-500 text-white px-3 py-1 rounded-full text-sm font-bold">
                           {cameraStream ? '🟢 カメラON' : '🔴 カメラOFF'}
                         </div>
@@ -616,71 +908,80 @@ export default function NewAppointment() {
                             ● 録画中
                           </div>
                         )}
-
-                        {/* 再生ボタン（必要に応じて） */}
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (videoRef.current) {
-                                videoRef.current.play().catch(console.error)
-                              }
-                            }}
-                            className="bg-blue-500 text-white p-4 rounded-full opacity-75 hover:opacity-100"
-                          >
-                            ▶️
-                          </button>
-                        </div>
                       </div>
 
                       <div className="flex justify-center gap-4">
                         <button
                           type="button"
                           onClick={takePhoto}
-                          disabled={!cameraStream}
+                          disabled={!cameraStream || isAnalyzing}
                           className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-400 flex items-center gap-2 font-semibold"
                         >
                           <span className="text-xl">📸</span>
-                          写真を撮る
+                          {isAnalyzing ? '分析中...' : '写真を撮る'}
                         </button>
                         <button
                           type="button"
                           onClick={closeCamera}
                           className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-semibold"
+                          disabled={isAnalyzing}
                         >
                           キャンセル
                         </button>
-                      </div>
-
-                      {/* デバッグ情報 */}
-                      <div className="bg-gray-100 p-3 rounded text-xs text-gray-600 space-y-1">
-                        <div><strong>状態:</strong> カメラストリーム: {cameraStream ? 'アクティブ' : '待機中'}</div>
-                        <div><strong>要素:</strong> ビデオ要素: {videoRef.current ? '存在' : '未初期化'}</div>
-                        {videoRef.current && (
-                          <div><strong>サイズ:</strong> {videoRef.current.videoWidth || 0}x{videoRef.current.videoHeight || 0}</div>
-                        )}
-                        <div><strong>時刻:</strong> {new Date().toLocaleTimeString()}</div>
                       </div>
                     </div>
                   )}
 
                   {capturedImage && (
                     <div className="mt-4">
-                      <h4 className="text-sm font-medium text-gray-700 mb-2">撮影した写真</h4>
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">撮影した舌の写真</h4>
                       <div className="relative inline-block">
                         <img
                           src={capturedImage}
-                          alt="症状写真"
+                          alt="舌の写真"
                           className="w-48 h-32 object-cover rounded-lg border shadow-md"
                         />
                         <button
                           type="button"
                           onClick={deleteImage}
-                          className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs hover:bg-red-600 flex items-center justify-center"
+                          disabled={isAnalyzing}
+                          className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs hover:bg-red-600 flex items-center justify-center disabled:bg-gray-400"
                         >
                           ×
                         </button>
                       </div>
+
+                      {/* 舌診分析状態の表示 */}
+                      {isAnalyzing ? (
+                        <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                          <div className="text-sm text-blue-800 font-medium flex items-center">
+                            <div className="animate-spin mr-2">⏳</div>
+                            舌診分析中です...
+                          </div>
+                          <div className="text-xs text-blue-600 mt-1">
+                            AI による舌の状態分析を実行しています
+                          </div>
+                        </div>
+                      ) : tongueAnalysisResult ? (
+                        <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-md">
+                          <div className="text-sm text-green-800 font-medium">
+                            ✅ 舌診分析完了
+                          </div>
+                          <div className="text-xs text-green-600 mt-1">
+                            画像と分析結果は医師の診断参考資料として活用されます
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-md">
+                          <div className="text-sm text-red-800 font-medium">
+                            ❌ 舌診分析に失敗しました
+                          </div>
+                          <div className="text-xs text-red-600 mt-1">
+                            写真を撮り直してください
+                          </div>
+                        </div>
+                      )}
+
                       <div className="mt-2">
                         <button
                           type="button"
@@ -688,7 +989,8 @@ export default function NewAppointment() {
                             deleteImage()
                             openCamera()
                           }}
-                          className="text-sm text-blue-500 hover:text-blue-700 underline"
+                          disabled={isAnalyzing}
+                          className="text-sm text-blue-500 hover:text-blue-700 underline disabled:text-gray-400"
                         >
                           写真を撮り直す
                         </button>
@@ -714,8 +1016,11 @@ export default function NewAppointment() {
                     </div>
                     {capturedImage && (
                       <div className="flex">
-                        <dt className="font-medium mr-2">添付写真：</dt>
-                        <dd>1枚</dd>
+                        <dt className="font-medium mr-2">舌診：</dt>
+                        <dd>
+                          {isAnalyzing ? "分析中..." :
+                            tongueAnalysisResult ? "分析完了" : "分析失敗"}
+                        </dd>
                       </div>
                     )}
                   </dl>
@@ -728,18 +1033,26 @@ export default function NewAppointment() {
                       setSelectedDoctor(null)
                       setSelectedSlot(null)
                       setCapturedImage(null)
+                      setTongueAnalysisResult(null)
                       closeCamera()
                     }}
-                    className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+                    disabled={isProcessing || isAnalyzing}
+                    className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 disabled:bg-gray-100"
                   >
                     キャンセル
                   </button>
                   <button
                     type="submit"
-                    disabled={!canSubmit || isSubmitting}
+                    disabled={!canSubmit}
                     className="bg-blue-500 text-white px-6 py-2 rounded-md hover:bg-blue-600 disabled:bg-gray-400"
                   >
-                    {isSubmitting ? "予約中..." : "予約確定"}
+                    {isProcessing
+                      ? "予約中..."
+                      : isAnalyzing
+                        ? "舌診分析中..."
+                        : (capturedImage && !tongueAnalysisResult)
+                          ? "舌診分析が必要です"
+                          : "予約確定"}
                   </button>
                 </div>
               </div>

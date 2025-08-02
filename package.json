@@ -87,6 +87,10 @@
     "seed:local": "tsx workers/seed-data.ts",
     "seed:generate-sql": "tsx workers/generate-seed-sql.ts",
     "seed:prod": "npm run seed:generate-sql && wrangler d1 execute medical-consultation-db --file=./workers/seed-prod.sql --remote",
-    "test": "vitest"
+    "test": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
   }
 }

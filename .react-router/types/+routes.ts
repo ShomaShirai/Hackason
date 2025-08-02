@@ -16,6 +16,9 @@ type Pages = {
   "/worker/login": {
     params: {};
   };
+  "/patient": {
+    params: {};
+  };
   "/patient/login": {
     params: {};
   };
@@ -39,6 +42,9 @@ type Pages = {
     };
   };
   "/patient/messages": {
+    params: {};
+  };
+  "/patient/prescriptions": {
     params: {};
   };
   "/worker/doctor/dashboard": {
@@ -66,6 +72,9 @@ type Pages = {
   "/worker/operator/assignment-board": {
     params: {};
   };
+  "/worker/operator/appointments": {
+    params: {};
+  };
   "/worker/admin/doctors": {
     params: {};
   };
@@ -87,7 +96,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/worker/login" | "/patient/login" | "/patient/dashboard" | "/patient/appointments" | "/patient/appointments/new" | "/patient/appointments/:id/questionnaire" | "/patient/consultation/:id" | "/patient/messages" | "/worker/doctor/dashboard" | "/worker/doctor/schedule" | "/worker/doctor/consultation/:id" | "/worker/doctor/patients" | "/worker/doctor/medical-records/:id/edit" | "/worker/operator/dashboard" | "/worker/operator/assignment-board" | "/worker/admin/doctors" | "/worker/admin/doctors/:id/schedule/edit" | "/worker/dashboard" | "/worker/consultation/:id";
+    page: "/" | "/worker/login" | "/patient" | "/patient/login" | "/patient/dashboard" | "/patient/appointments" | "/patient/appointments/new" | "/patient/appointments/:id/questionnaire" | "/patient/consultation/:id" | "/patient/messages" | "/patient/prescriptions" | "/worker/doctor/dashboard" | "/worker/doctor/schedule" | "/worker/doctor/consultation/:id" | "/worker/doctor/patients" | "/worker/doctor/medical-records/:id/edit" | "/worker/operator/dashboard" | "/worker/operator/assignment-board" | "/worker/operator/appointments" | "/worker/admin/doctors" | "/worker/admin/doctors/:id/schedule/edit" | "/worker/dashboard" | "/worker/consultation/:id";
   };
   "routes/home.tsx": {
     id: "routes/home";
@@ -96,6 +105,10 @@ type RouteFiles = {
   "routes/worker/login.tsx": {
     id: "routes/worker/login";
     page: "/worker/login";
+  };
+  "routes/patient.tsx": {
+    id: "routes/patient";
+    page: "/patient";
   };
   "routes/patient/login.tsx": {
     id: "routes/patient/login";
@@ -125,6 +138,10 @@ type RouteFiles = {
     id: "routes/patient/messages";
     page: "/patient/messages";
   };
+  "routes/patient.prescriptions.tsx": {
+    id: "routes/patient.prescriptions";
+    page: "/patient/prescriptions";
+  };
   "routes/worker/doctor/dashboard.tsx": {
     id: "routes/worker/doctor/dashboard";
     page: "/worker/doctor/dashboard";
@@ -152,6 +169,10 @@ type RouteFiles = {
   "routes/worker/operator/assignment-board.tsx": {
     id: "routes/worker/operator/assignment-board";
     page: "/worker/operator/assignment-board";
+  };
+  "routes/worker/operator/appointments.tsx": {
+    id: "routes/worker/operator/appointments";
+    page: "/worker/operator/appointments";
   };
   "routes/worker/admin/doctors.tsx": {
     id: "routes/worker/admin/doctors";

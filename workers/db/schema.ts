@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import { z } from 'zod';
 
 // Zodスキーマ定義
@@ -187,6 +187,7 @@ export const medicalRecords = sqliteTable('medical_records', {
   // JSON形式: [{ id?, name, genericName?, dosage, frequency, duration, instructions }]
   aiSummary: text('ai_summary').default('{}'),
   // JSON形式: { extractedSymptoms, suggestedDiagnoses, keyPoints }
+  transcript: text('transcript'), // この行を追加
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull().defaultNow(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().defaultNow(),
 });
