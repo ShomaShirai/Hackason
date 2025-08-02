@@ -191,7 +191,7 @@ export function CloudflareRealtimeVideo({
         console.log('🆕 患者セッション - オファー作成');
         setTimeout(() => {
           manager.createOffer();
-        }, 1000);
+        }, 100000);
       } else if (userType === 'worker') {
         console.log('👨‍⚕️ 医療従事者セッション - オファー待機');
         // 医療従事者は患者からのオファーを待機してAnswerで応答

@@ -1,18 +1,18 @@
-import { drizzle } from 'drizzle-orm/libsql';
 import { createClient } from '@libsql/client';
 import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/libsql';
 import { hashPasswordSync } from './auth/password';
 import {
-  patients,
-  workers,
-  specialties,
-  qualifications,
+  doctorQualifications,
   doctorSpecialties,
-  doctorQualifications
+  patients,
+  qualifications,
+  specialties,
+  workers
 } from './db/schema';
 
 const client = createClient({
-  url: 'file:.wrangler/state/v3/d1/miniflare-D1DatabaseObject/68ac3c8ac2484ab5dd28be90eb723c4cae2f05469e8abbac31b835ce3ae4af89.sqlite',
+  url: 'file:.wrangler/state/v3/d1/miniflare-D1DatabaseObject/4e06e3b92174d6a1eb1962c54bba2bc97a274b2b3378ad576b6b409e387e5b38.sqlite',
 });
 
 const db = drizzle(client);

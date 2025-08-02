@@ -1,6 +1,6 @@
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 import type { Env } from '../types/env';
-import type { Context } from 'hono';
 
 const turnApi = new Hono<{ Bindings: Env }>();
 
@@ -11,7 +11,7 @@ const turnApi = new Hono<{ Bindings: Env }>();
 turnApi.get('/turn-credentials', async (c: Context<{ Bindings: Env }>) => {
   const turnServiceId = c.env.TURN_SERVICE_ID;
   const turnServiceToken = c.env.TURN_SERVICE_TOKEN;
-  
+
   // デバッグ情報（値の一部をマスク）
   console.log('TURN service config:', {
     hasServiceId: !!turnServiceId,
@@ -21,9 +21,8 @@ turnApi.get('/turn-credentials', async (c: Context<{ Bindings: Env }>) => {
     tokenLength: turnServiceToken?.length || 0,
     tokenPrefix: turnServiceToken?.substring(0, 8) + '...'
   });
-  
   if (!turnServiceId || !turnServiceToken) {
-    return c.json({ 
+    return c.json({
       error: 'TURN service not configured',
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
