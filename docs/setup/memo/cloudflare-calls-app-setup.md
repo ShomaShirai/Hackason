@@ -95,7 +95,7 @@ export interface Env {
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "medical-consultation-db",
+      "database_name": "takoyaki-db",
       "database_id": "05db35e6-eb77-436b-850a-f7e4868190f8"
     }
   ]

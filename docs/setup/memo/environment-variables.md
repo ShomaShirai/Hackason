@@ -76,7 +76,7 @@ Cloudflare Workers環境では、`wrangler.jsonc` で設定：
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "medical-consultation-db",
+      "database_name": "takoyaki-db",
       "database_id": "your-actual-d1-database-id",
     },
   ],

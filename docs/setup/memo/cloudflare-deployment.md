@@ -34,7 +34,7 @@ wrangler login
 
 ```bash
 # データベース作成
-wrangler d1 create medical-consultation-db
+wrangler d1 create takoyaki-db
 
 # 出力される database_id をメモしておく
 ```
@@ -45,7 +45,7 @@ wrangler d1 create medical-consultation-db
 "d1_databases": [
   {
     "binding": "DB",
-    "database_name": "medical-consultation-db",
+    "database_name": "takoyaki-db",
     "database_id": "実際のdatabase_idをここに入力", // <-- 更新
     "migrations_dir": "./drizzle"
   }
@@ -59,7 +59,7 @@ wrangler d1 create medical-consultation-db
 npm run drizzle:generate
 
 # リモートD1にマイグレーション適用
-wrangler d1 migrations apply medical-consultation-db
+wrangler d1 migrations apply takoyaki-db
 ```
 
 ## シークレット設定
@@ -115,7 +115,7 @@ wrangler deploy
    ```
 
    - マイグレーションが実行されているか確認
-   - `wrangler d1 migrations list medical-consultation-db`で状態確認
+   - `wrangler d1 migrations list takoyaki-db`で状態確認
 
 3. **ビルドエラー**
 

@@ -1130,7 +1130,7 @@
   - JWT環境変数設定: JWT_ACCESS_TOKEN_EXPIRY (3600秒), JWT_REFRESH_TOKEN_EXPIRY (604800秒)
   - Cloudflareデプロイガイド作成: docs/setup/cloudflare-deployment.md
   - D1データベース作成完了:
-    - database_name: medical-consultation-db
+    - database_name: takoyaki-db
     - database_id: 05db35e6-eb77-436b-850a-f7e4868190f8
     - リージョン: APAC
   - SessionStore修正: グローバルスコープでのインスタンス生成を遅延初期化に変更

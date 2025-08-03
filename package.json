@@ -86,7 +86,7 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,css}\"",
     "seed:local": "tsx workers/seed-data.ts",
     "seed:generate-sql": "tsx workers/generate-seed-sql.ts",
-    "seed:prod": "npm run seed:generate-sql && wrangler d1 execute medical-consultation-db --file=./workers/seed-prod.sql --remote",
+    "seed:prod": "npm run seed:generate-sql && wrangler d1 execute takoyaki-db --file=./workers/seed-prod.sql --remote",
     "test": "vitest"
   }
 }

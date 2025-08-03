@@ -1,10 +1,10 @@
-import type { Route } from "./+types/new"
+import React, { useEffect, useState } from "react"
 import { useLoaderData, useNavigation } from "react-router"
-import React, { useState, useEffect } from "react"
-import { Loading } from "~/components/common/Loading"
 import { RequireAuth } from "~/components/auth/RequireAuth"
 import { ErrorMessage } from "~/components/common/ErrorMessage"
+import { Loading } from "~/components/common/Loading"
 import { getAuthToken } from "../../../utils/auth"
+import type { Route } from "./+types/new"
 
 // Web Speech API の型定義
 interface SpeechRecognition extends EventTarget {
@@ -75,7 +75,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     const jstDate = new Date(now.getTime() + 9 * 60 * 60 * 1000)
     return jstDate.toISOString().split("T")[0]
   }
-  
+
   const date = url.searchParams.get("date") || getCurrentJstDate()
   const specialty = url.searchParams.get("specialty") || ""
 
@@ -145,7 +145,7 @@ export default function NewAppointment() {
   const [selectedDoctor, setSelectedDoctor] = useState<number | null>(null)
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null)
   const [chiefComplaint, setChiefComplaint] = useState("")
-  const [chatMessages, setChatMessages] = useState<{id: string, text: string, isUser: boolean, timestamp: Date}[]>([])
+  const [chatMessages, setChatMessages] = useState<{ id: string, text: string, isUser: boolean, timestamp: Date }[]>([])
   const [currentInput, setCurrentInput] = useState("")
   const [questionnaireData, setQuestionnaireData] = useState<string | null>(null)
   const [showQuestionnaire, setShowQuestionnaire] = useState(false)
@@ -155,7 +155,7 @@ export default function NewAppointment() {
   const [slots, setSlots] = useState<DoctorSlot[]>([])
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
   const [slotsError, setSlotsError] = useState<string | null>(null)
-  
+
   // 外部API関連の状態
   const [isExternalAPILoading, setIsExternalAPILoading] = useState(false)
   const [externalAPIError, setExternalAPIError] = useState<string | null>(null)
@@ -164,6 +164,17 @@ export default function NewAppointment() {
   const [isListening, setIsListening] = useState(false)
   const [speechRecognition, setSpeechRecognition] = useState<SpeechRecognition | null>(null)
   const [speechError, setSpeechError] = useState<string | null>(null)
+
+  // カメラ関連の状態
+  const [capturedImage, setCapturedImage] = useState<string | null>(null)
+  const [isCameraOpen, setIsCameraOpen] = useState(false)
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
+  const videoRef = React.useRef<HTMLVideoElement>(null)
+  const canvasRef = React.useRef<HTMLCanvasElement>(null)
+
+  // 舌診関連の状態
+  const [tongueAnalysisResult, setTongueAnalysisResult] = useState<any>(null)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
 
   const isSubmitting = navigation.state === "submitting"
 
@@ -200,11 +211,11 @@ export default function NewAppointment() {
         throw new Error("スロット情報の取得に失敗しました")
       }
 
-             const data = await response.json() as any
-       setSlots(data.slots || [])
-         } catch (err: any) {
-       console.error("Error loading available slots:", err)
-       setSlotsError(err instanceof Error ? err.message : "スロット情報の取得に失敗しました")
+      const data = await response.json() as any
+      setSlots(data.slots || [])
+    } catch (err: any) {
+      console.error("Error loading available slots:", err)
+      setSlotsError(err instanceof Error ? err.message : "スロット情報の取得に失敗しました")
       setSlots([])
     } finally {
       setIsLoadingSlots(false)
@@ -236,7 +247,7 @@ export default function NewAppointment() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedDoctor || !selectedSlot || !chiefComplaint.trim()) {return}
+    if (!selectedDoctor || !selectedSlot || !chiefComplaint.trim()) { return }
 
     setSlotsError(null)
 
@@ -259,6 +270,8 @@ export default function NewAppointment() {
           endTime: selectedSlot.endTime,
           appointmentType,
           chiefComplaint,
+          hasImage: !!capturedImage,
+          imageData: capturedImage,
         }),
       })
 
@@ -296,13 +309,13 @@ export default function NewAppointment() {
     // ユーザーメッセージをチャットに追加
     const newChatMessages = [...chatMessages, userMessage]
     setChatMessages(newChatMessages)
-    
+
     // 主訴フィールドも更新（フォーム送信用）
     setChiefComplaint(newChatMessages.map(msg => `${msg.isUser ? '患者' : 'AI'}: ${msg.text}`).join('\n'))
-    
+
     const messageToSend = currentInput.trim()
     setCurrentInput('')
-    
+
     // DIFY APIに送信
     await handleDIFYAPICall(messageToSend, newChatMessages)
   }
@@ -319,7 +332,7 @@ export default function NewAppointment() {
       /^\s*\|.+\|\s*$/m,   // テーブル
       /```[\s\S]*?```/,    // コードブロック
     ]
-    
+
     // 問診関連のキーワードもチェック
     const questionnaireKeywords = [
       '問診表',
@@ -328,10 +341,10 @@ export default function NewAppointment() {
       '症状まとめ',
       '受診内容'
     ]
-    
+
     const hasMarkdownPatterns = markdownPatterns.some(pattern => pattern.test(text))
     const hasQuestionnaireKeywords = questionnaireKeywords.some(keyword => text.includes(keyword))
-    
+
     return hasMarkdownPatterns && hasQuestionnaireKeywords
   }
 
@@ -365,7 +378,7 @@ export default function NewAppointment() {
       const result = await response.json() as {
         comment: string
       }
-      
+
       // マークダウン形式の問診表かチェック
       if (isMarkdownQuestionnaire(result.comment)) {
         // マークダウンの場合は問診表データのみ保存し、チャットには表示しない
@@ -380,18 +393,18 @@ export default function NewAppointment() {
           isUser: false,
           timestamp: new Date()
         }
-        
+
         const updatedMessages = [...currentChatMessages, aiMessage]
         setChatMessages(updatedMessages)
-        
+
         // 主訴フィールドも更新
         setChiefComplaint(updatedMessages.map(msg => `${msg.isUser ? '患者' : 'AI'}: ${msg.text}`).join('\n'))
       }
-      
+
     } catch (error) {
       console.error('DIFY API error:', error)
       setExternalAPIError(error instanceof Error ? error.message : 'AI分析中にエラーが発生しました')
-      
+
       // エラーメッセージもチャットに追加
       const errorMessage = {
         id: (Date.now() + 1).toString(),
@@ -419,26 +432,26 @@ export default function NewAppointment() {
         recognition.continuous = true
         recognition.interimResults = true
         recognition.lang = 'ja-JP'
-        
 
-        
+
+
         recognition.onerror = (event) => {
           console.error('Speech recognition error:', event.error)
           setSpeechError(`音声認識エラー: ${event.error}`)
           setIsListening(false)
         }
-        
+
         recognition.onend = () => {
           setIsListening(false)
         }
-        
+
         // 音声認識の自動停止（5秒間音声がない場合）
         let silenceTimer: NodeJS.Timeout
         recognition.onresult = (event) => {
           // 既存のonresult処理をここに移動
           let finalTranscript = ''
           let interimTranscript = ''
-          
+
           for (let i = event.resultIndex; i < event.results.length; i++) {
             const transcript = event.results[i][0].transcript
             if (event.results[i].isFinal) {
@@ -447,7 +460,7 @@ export default function NewAppointment() {
               interimTranscript += transcript
             }
           }
-          
+
           if (finalTranscript) {
             // チャット入力フィールドに追加
             setCurrentInput(prev => {
@@ -455,7 +468,7 @@ export default function NewAppointment() {
               return currentText ? `${currentText} ${finalTranscript}` : finalTranscript
             })
           }
-          
+
           // 音声が検出されたらタイマーをリセット
           clearTimeout(silenceTimer)
           silenceTimer = setTimeout(() => {
@@ -464,7 +477,7 @@ export default function NewAppointment() {
             }
           }, 5000) // 5秒間音声がない場合に自動停止
         }
-        
+
         setSpeechRecognition(recognition)
       } else {
         setSpeechError('お使いのブラウザは音声認識をサポートしていません')
@@ -486,6 +499,200 @@ export default function NewAppointment() {
     if (speechRecognition) {
       speechRecognition.stop()
       setIsListening(false)
+    }
+  }
+
+  // カメラを開く関数
+  const openCamera = async () => {
+    console.log("🎥 カメラ起動を開始...")
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      console.error("❌ このブラウザはgetUserMediaをサポートしていません")
+      setSlotsError("このブラウザはカメラ機能をサポートしていません。")
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false
+      })
+
+      console.log("✅ カメラストリーム取得成功:", stream)
+      setCameraStream(stream)
+      setIsCameraOpen(true)
+
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          videoRef.current.play().catch(console.error)
+        }
+      }, 200)
+
+    } catch (error) {
+      console.error("❌ カメラアクセス失敗:", error)
+      let errorMessage = "カメラにアクセスできませんでした。"
+
+      if (error instanceof Error) {
+        switch (error.name) {
+          case 'NotAllowedError':
+            errorMessage += " カメラの使用許可を与えてください。"
+            break
+          case 'NotFoundError':
+            errorMessage += " カメラデバイスが見つかりませんでした。"
+            break
+          case 'NotReadableError':
+            errorMessage += " カメラが他のアプリケーションで使用中です。"
+            break
+          default:
+            errorMessage += ` エラー: ${error.message}`
+        }
+      }
+      setSlotsError(errorMessage)
+    }
+  }
+
+  // カメラを閉じる関数
+  const closeCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop())
+      setCameraStream(null)
+    }
+    setIsCameraOpen(false)
+  }
+
+  // 写真撮影関数
+  const takePhoto = async () => {
+    console.log('📸 写真撮影開始...')
+
+    if (videoRef.current && canvasRef.current) {
+      const canvas = canvasRef.current
+      const video = videoRef.current
+
+      console.log('📐 ビデオサイズ:', {
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        readyState: video.readyState,
+        currentTime: video.currentTime,
+        paused: video.paused,
+        ended: video.ended
+      })
+
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        ctx.drawImage(video, 0, 0)
+        const imageDataUrl = canvas.toDataURL('image/png')
+
+        console.log('🖼️ 画像データ生成:', {
+          dataUrlLength: imageDataUrl.length,
+          format: imageDataUrl.substring(0, 30) + '...',
+          canvasSize: `${canvas.width}x${canvas.height}`,
+          isValidDataUrl: imageDataUrl.startsWith('data:image/')
+        })
+
+        setCapturedImage(imageDataUrl)
+        closeCamera()
+
+        // 舌診分析を自動実行
+        console.log('📸 写真撮影完了 - 舌診分析を開始します')
+        try {
+          await performTongueDiagnosis(imageDataUrl)
+        } catch (error) {
+          console.error('❌ takePhoto内での舌診分析エラー:', error)
+          setSlotsError(`舌診分析に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`)
+        }
+      } else {
+        console.error('❌ Canvas context取得失敗')
+        setSlotsError('画像の処理に失敗しました。もう一度お試しください。')
+      }
+    } else {
+      console.error('❌ Video または Canvas 要素が見つかりません:', {
+        video: !!videoRef.current,
+        canvas: !!canvasRef.current,
+        videoElement: videoRef.current,
+        canvasElement: canvasRef.current
+      })
+      setSlotsError('カメラまたはキャンバス要素が見つかりません。')
+    }
+  }
+
+  // 撮影した写真を削除する関数
+  const deleteImage = () => {
+    setCapturedImage(null)
+    setTongueAnalysisResult(null)
+  }
+
+  // 舌診分析を実行する関数
+  const performTongueDiagnosis = async (imageData: string) => {
+    console.log('🔍 舌診分析実行中...')
+    setIsAnalyzing(true)
+
+    try {
+      const token = getAuthToken('/patient')
+      if (!token) {
+        throw new Error('認証トークンが見つかりません')
+      }
+
+      const requestBody = {
+        imageData: imageData,
+        symptoms: chiefComplaint,
+        patientContext: {
+          appointmentType,
+          chiefComplaint
+        }
+      }
+
+      console.log('📤 舌診分析リクエスト送信:', {
+        hasImageData: !!imageData,
+        hasSymptoms: !!chiefComplaint,
+        appointmentType
+      })
+
+      const response = await fetch('/api/tongue-diagnosis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(requestBody)
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('❌ 舌診分析API失敗:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText
+        })
+        throw new Error(`舌診分析に失敗しました: ${response.status} ${errorText}`)
+      }
+
+      const result = await response.json() as { analysis: any; success: boolean; message: string }
+      console.log('✅ 舌診分析結果:', result)
+
+      if (!result) {
+        throw new Error(`舌診分析エラー: 結果が取得できませんでした`)
+      }
+
+      setTongueAnalysisResult(result.analysis)
+
+      // フォールバック結果の場合は特別なメッセージを表示
+      if (result.success && result.message.includes('フォールバック')) {
+        setSlotsError('⚠️ 外部APIに接続できませんでしたが、基本的な分析結果を提供します。')
+      } else {
+        setSlotsError('✅ AI舌診分析が完了しました。分析結果が予約に含まれます。')
+      }
+
+    } catch (error) {
+      console.error('❌ 舌診分析失敗:', error)
+      setSlotsError(`舌診分析に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`)
+      setCapturedImage(null)
+      setTongueAnalysisResult(null)
+    } finally {
+      setIsAnalyzing(false)
     }
   }
 
@@ -537,14 +744,14 @@ export default function NewAppointment() {
             </div>
           </div>
 
-            <button
+          <button
             type="button"
             onClick={handleSearchSlots}
             disabled={isLoadingSlots}
-              className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 disabled:bg-gray-400"
-            >
+            className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 disabled:bg-gray-400"
+          >
             {isLoadingSlots ? "検索中..." : "空き時間を検索"}
-            </button>
+          </button>
         </div>
 
         {isLoadingSlots ? (
@@ -568,11 +775,10 @@ export default function NewAppointment() {
                       disabled={!slot.available}
                       className={`
                         p-2 text-sm rounded-md transition-colors
-                        ${
-                          !slot.available
-                            ? "bg-gray-200 text-gray-400 cursor-not-allowed"
-                            : selectedDoctor === doctorSlot.doctorId &&
-                              selectedSlot?.startTime === slot.startTime
+                        ${!slot.available
+                          ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                          : selectedDoctor === doctorSlot.doctorId &&
+                            selectedSlot?.startTime === slot.startTime
                             ? "bg-blue-500 text-white"
                             : "bg-gray-100 hover:bg-gray-200"
                         }
@@ -634,14 +840,14 @@ export default function NewAppointment() {
                       主訴（チャット形式で症状をお聞かせください）
                     </label>
                   </div>
-                  
+
                   {/* 音声認識エラー表示 */}
                   {speechError && (
                     <div className="mb-2 p-2 bg-red-50 border border-red-200 rounded-md">
                       <p className="text-sm text-red-700">{speechError}</p>
                     </div>
                   )}
-                  
+
                   {/* チャット形式の入力 */}
                   <div className="border border-gray-300 rounded-lg">
                     {/* チャットメッセージ表示エリア */}
@@ -655,24 +861,21 @@ export default function NewAppointment() {
                           {chatMessages.map((message) => (
                             <div
                               key={message.id}
-                              className={`flex ${
-                                message.isUser ? "justify-end" : "justify-start"
-                              }`}
+                              className={`flex ${message.isUser ? "justify-end" : "justify-start"
+                                }`}
                             >
                               <div
-                                className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                                  message.isUser
-                                    ? "bg-blue-500 text-white"
-                                    : "bg-white border border-gray-200 text-gray-800"
-                                }`}
+                                className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${message.isUser
+                                  ? "bg-blue-500 text-white"
+                                  : "bg-white border border-gray-200 text-gray-800"
+                                  }`}
                               >
                                 <p className="text-sm">{message.text}</p>
-                                <p className={`text-xs mt-1 ${
-                                  message.isUser ? "text-blue-100" : "text-gray-500"
-                                }`}>
-                                  {message.timestamp.toLocaleTimeString('ja-JP', { 
-                                    hour: '2-digit', 
-                                    minute: '2-digit' 
+                                <p className={`text-xs mt-1 ${message.isUser ? "text-blue-100" : "text-gray-500"
+                                  }`}>
+                                  {message.timestamp.toLocaleTimeString('ja-JP', {
+                                    hour: '2-digit',
+                                    minute: '2-digit'
                                   })}
                                 </p>
                               </div>
@@ -692,7 +895,7 @@ export default function NewAppointment() {
                         </div>
                       )}
                     </div>
-                    
+
                     {/* 問診表ボタン */}
                     {questionnaireData && (
                       <div className="px-4 py-2 border-t border-gray-300 bg-gray-50">
@@ -708,7 +911,7 @@ export default function NewAppointment() {
                         </button>
                       </div>
                     )}
-                    
+
                     {/* メッセージ入力エリア */}
                     <div className="border-t border-gray-300 p-4">
                       <div className="flex gap-2">
@@ -727,7 +930,7 @@ export default function NewAppointment() {
                             className="w-full px-3 py-2 pr-12 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                             disabled={isExternalAPILoading}
                           />
-                          
+
                           {/* 音声認識ボタン（チャット内） */}
                           <div className="absolute right-2 top-2">
                             {isListening ? (
@@ -757,7 +960,7 @@ export default function NewAppointment() {
                             )}
                           </div>
                         </div>
-                        
+
                         <button
                           type="button"
                           onClick={handleSendMessage}
@@ -770,7 +973,7 @@ export default function NewAppointment() {
                           送信
                         </button>
                       </div>
-                      
+
                       {/* 音声認識中のインジケーター */}
                       {isListening && (
                         <div className="mt-2 flex items-center gap-2">
@@ -784,11 +987,157 @@ export default function NewAppointment() {
                       )}
                     </div>
                   </div>
-                  
+
                   {/* チャットモード用のエラーメッセージ */}
                   {externalAPIError && (
                     <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md">
                       <p className="text-sm text-red-700">{externalAPIError}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* カメラ機能セクション */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    舌の写真（任意・診断の参考資料として使用されます）
+                  </label>
+
+                  {!capturedImage && !isCameraOpen && (
+                    <button
+                      type="button"
+                      onClick={openCamera}
+                      className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      舌の写真を撮る
+                    </button>
+                  )}
+
+                  {isCameraOpen && (
+                    <div className="space-y-4">
+                      <div className="text-center">
+                        <p className="text-sm text-gray-600 mb-2">舌を画面中央に映して撮影してください</p>
+                      </div>
+
+                      <div className="relative bg-gray-900 rounded-lg overflow-hidden border-4 border-blue-300 mx-auto" style={{ maxWidth: '500px' }}>
+                        <video
+                          ref={videoRef}
+                          autoPlay
+                          playsInline
+                          muted
+                          className="w-full h-auto block"
+                          style={{
+                            minHeight: '300px',
+                            backgroundColor: '#1f2937'
+                          }}
+                        />
+                        <canvas
+                          ref={canvasRef}
+                          className="hidden"
+                        />
+
+                        <div className="absolute top-4 left-4 bg-green-500 text-white px-3 py-1 rounded-full text-sm font-bold">
+                          {cameraStream ? '🟢 カメラON' : '🔴 カメラOFF'}
+                        </div>
+
+                        {cameraStream && (
+                          <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-bold animate-pulse">
+                            ● 録画中
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex justify-center gap-4">
+                        <button
+                          type="button"
+                          onClick={takePhoto}
+                          disabled={!cameraStream || isAnalyzing}
+                          className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-400 flex items-center gap-2 font-semibold"
+                        >
+                          <span className="text-xl">📸</span>
+                          {isAnalyzing ? '分析中...' : '写真を撮る'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={closeCamera}
+                          className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-semibold"
+                        >
+                          キャンセル
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {capturedImage && (
+                    <div className="mt-4">
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">撮影した舌の写真</h4>
+                      <div className="relative inline-block">
+                        <img
+                          src={capturedImage}
+                          alt="舌の写真"
+                          className="w-48 h-32 object-cover rounded-lg border shadow-md"
+                        />
+                        <button
+                          type="button"
+                          onClick={deleteImage}
+                          className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs hover:bg-red-600 flex items-center justify-center"
+                        >
+                          ×
+                        </button>
+                      </div>
+
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            deleteImage()
+                            openCamera()
+                          }}
+                          className="text-sm text-blue-500 hover:text-blue-700 underline"
+                        >
+                          写真を撮り直す
+                        </button>
+                      </div>
+
+                      {/* 舌診分析結果の表示 */}
+                      {tongueAnalysisResult && (
+                        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                          <h4 className="text-sm font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            AI舌診分析結果
+                          </h4>
+                          <div className="space-y-2 text-sm">
+                            <div>
+                              <span className="font-medium text-gray-700">色：</span>
+                              <span className="text-gray-600 ml-1">{tongueAnalysisResult.color}</span>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-700">状態：</span>
+                              <span className="text-gray-600 ml-1">{tongueAnalysisResult.condition}</span>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-700">形状：</span>
+                              <span className="text-gray-600 ml-1">{tongueAnalysisResult.shape}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 分析中のローディング表示 */}
+                      {isAnalyzing && (
+                        <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-500"></div>
+                            <span className="text-sm text-yellow-700 font-medium">AI舌診分析中...</span>
+                          </div>
+                          <p className="text-xs text-yellow-600 mt-1">画像を分析しています。しばらくお待ちください。</p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -808,6 +1157,12 @@ export default function NewAppointment() {
                       <dt className="font-medium mr-2">診察種別：</dt>
                       <dd>{appointmentType === "initial" ? "初診" : "再診"}</dd>
                     </div>
+                    {capturedImage && (
+                      <div className="flex">
+                        <dt className="font-medium mr-2">舌の写真：</dt>
+                        <dd>撮影済み</dd>
+                      </div>
+                    )}
                   </dl>
                 </div>
 
@@ -817,6 +1172,8 @@ export default function NewAppointment() {
                     onClick={() => {
                       setSelectedDoctor(null)
                       setSelectedSlot(null)
+                      setCapturedImage(null)
+                      closeCamera()
                     }}
                     className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
                   >
@@ -834,7 +1191,7 @@ export default function NewAppointment() {
             </form>
           </div>
         )}
-        
+
         {/* 問診表モーダル */}
         {showQuestionnaire && questionnaireData && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -851,14 +1208,14 @@ export default function NewAppointment() {
                   </svg>
                 </button>
               </div>
-              
+
               {/* モーダルコンテンツ */}
               <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
                 <div className="prose max-w-none">
                   <MarkdownRenderer content={questionnaireData} />
                 </div>
               </div>
-              
+
               {/* モーダルフッター */}
               <div className="flex justify-end gap-3 p-6 border-t border-gray-200">
                 <button
@@ -890,32 +1247,32 @@ function MarkdownRenderer({ content }: { content: string }) {
   // 基本的なマークダウン記法をHTMLに変換
   const renderMarkdown = (text: string) => {
     let html = text
-    
+
     // ヘッダー (# ## ### など)
     html = html.replace(/^### (.*$)/gim, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>')
     html = html.replace(/^## (.*$)/gim, '<h2 class="text-xl font-semibold mt-6 mb-3">$1</h2>')
     html = html.replace(/^# (.*$)/gim, '<h1 class="text-2xl font-bold mt-8 mb-4">$1</h1>')
-    
+
     // 太字 **text**
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>')
-    
+
     // 斜体 *text*
     html = html.replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
-    
+
     // リスト項目 - または *
     html = html.replace(/^[\s]*[-*+]\s+(.*$)/gim, '<li class="ml-4 mb-1">• $1</li>')
-    
+
     // 番号付きリスト 1.
     html = html.replace(/^[\s]*(\d+)\.\s+(.*$)/gim, '<li class="ml-4 mb-1">$1. $2</li>')
-    
+
     // 改行を<br>に変換
     html = html.replace(/\n/g, '<br>')
-    
+
     return html
   }
 
   return (
-    <div 
+    <div
       className="text-gray-800 leading-relaxed"
       dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
     />

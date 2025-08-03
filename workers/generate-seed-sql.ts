@@ -1,8 +1,8 @@
 
-import { hashPasswordSync } from './auth/password';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { hashPasswordSync } from './auth/password';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -70,4 +70,4 @@ fs.writeFileSync(outputPath, sqlContent, 'utf-8');
 
 console.log(`\n✅ SQLファイルを生成しました: ${outputPath}`);
 console.log('\n以下のコマンドで本番環境にシードデータを投入できます:');
-console.log('npx wrangler d1 execute medical-consultation-db --file=./workers/seed-prod.sql --remote');
+console.log('npx wrangler d1 execute takoyaki-db --file=./workers/seed-prod.sql --remote');

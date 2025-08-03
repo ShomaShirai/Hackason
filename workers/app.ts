@@ -24,6 +24,7 @@ import { SessionManager } from './auth/session';
 // import { patientAuthMiddleware, workerAuthMiddleware } from './auth/middleware';
 
 // APIハンドラーのインポート
+import symptomAnalysisRouter from './api/external/symptom-analysis';
 import adminDoctorHandlers from './api/handlers/admin-doctors';
 import appointmentHandlers from './api/handlers/appointments';
 import chatHandlers from './api/handlers/chat';
@@ -54,6 +55,7 @@ export interface Env {
   SIGNALING_ROOM: DurableObjectNamespace;
   DIFY_BASE_URL: string;
   DIFY_API_KEY: string;
+  DIFY_PHOTO_API_KEY: string;
 }
 
 // Hono型定義の拡張
@@ -2277,6 +2279,7 @@ api.post('/video-sessions/:sessionId/end', authMiddleware(), async (c) => {
 api.route('/patient/appointments', appointmentHandlers);
 api.route('/patient/questionnaire', questionnaireHandlers);
 api.route('/patient/prescriptions', patientPrescriptionsHandlers);
+api.route('/external/symptom-analysis', symptomAnalysisRouter);
 
 api.route('/worker/admin/doctors', adminDoctorHandlers);
 api.route('/worker/doctor/schedule', doctorScheduleHandlers);
@@ -2284,6 +2287,49 @@ api.route('/worker/doctor/patients', doctorPatientHandlers);
 api.route('/worker/operator/appointments', operatorAppointmentHandlers);
 api.route('/worker/appointments', operatorAppointmentHandlers);
 api.route('/chat', chatHandlers);
+
+// 舌診分析エンドポイント
+api.post('/tongue-diagnosis', authMiddleware(), async (c) => {
+  try {
+    const user = c.get('user');
+
+    // 患者のみアクセス可能
+    if (user.userType !== 'patient') {
+      return c.json({ error: 'Patients only' }, 403);
+    }
+
+    const body = await c.req.json();
+    const { imageData, symptoms, patientContext } = body;
+
+    if (!imageData) {
+      return c.json({ error: '画像データが必要です' }, 400);
+    }
+
+    // 舌診サービスの動的インポート
+    const { createTongueDiagnosisService } = await import('./api/diagnosis-tongue');
+    const tongueService = createTongueDiagnosisService(c.env);
+
+    // 舌診分析実行
+    const result = await tongueService.analyze({
+      imageData,
+      symptoms,
+      patientContext: {
+        ...patientContext,
+        userId: user.id
+      }
+    });
+
+    return c.json(result);
+
+  } catch (error) {
+    console.error('❌ 舌診分析エンドポイントエラー:', error);
+    return c.json({
+      success: false,
+      error: '舌診分析中にエラーが発生しました',
+      message: error instanceof Error ? error.message : '不明なエラー'
+    }, 500);
+  }
+});
 
 // 医師向けカルテ一覧取得
 api.get('/worker/doctor/medical-records', authMiddleware(), async (c) => {

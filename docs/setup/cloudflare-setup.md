@@ -36,15 +36,15 @@ wrangler login
 
 ```bash
 # D1データベースを作成
-wrangler d1 create medical-consultation-db
+wrangler d1 create takoyaki-db
 
 # 出力例:
-# ✅ Successfully created DB 'medical-consultation-db' in region APAC
+# ✅ Successfully created DB 'takoyaki-db' in region APAC
 # Created your database using D1's new storage backend. The new storage backend is not yet recommended for production workloads, but backs up your data via point-in-time restore.
 # 
 # [[d1_databases]]
 # binding = "DB"
-# database_name = "medical-consultation-db"
+# database_name = "takoyaki-db"
 # database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ```
 
@@ -66,7 +66,7 @@ cp wrangler.example.jsonc wrangler.jsonc
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "medical-consultation-db",
+      "database_name": "takoyaki-db",
       "database_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  // 上記でメモしたID
     }
   ],
@@ -109,7 +109,7 @@ npx drizzle-kit push
 npm run seed:local
 
 # 本番環境へのマイグレーション適用
-npx wrangler d1 migrations apply medical-consultation-db
+npx wrangler d1 migrations apply takoyaki-db
 ```
 
 ### 7. デプロイ
@@ -158,7 +158,7 @@ Error: D1_ERROR: no such table: users
 **解決方法**:
 ```bash
 # マイグレーションの再実行
-npx wrangler d1 migrations apply medical-consultation-db --local
+npx wrangler d1 migrations apply takoyaki-db --local
 ```
 
 #### 2. 認証エラー

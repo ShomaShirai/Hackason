@@ -13,21 +13,21 @@ Cloudflare D1のローカル開発環境にテストデータを投入する手�
 rm -rf .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*
 
 # D1データベースを初期化
-npx wrangler d1 execute medical-consultation-db --local --command "SELECT 1"
+npx wrangler d1 execute takoyaki-db --local --command "SELECT 1"
 ```
 
 ### 2. テーブルの作成
 
 ```bash
 # SQLファイルからテーブルを作成
-npx wrangler d1 execute medical-consultation-db --local --file drizzle/push.sql
+npx wrangler d1 execute takoyaki-db --local --file drizzle/push.sql
 ```
 
 ### 3. テストデータの投入
 
 ```bash
 # テストデータを投入
-npx wrangler d1 execute medical-consultation-db --local --file tmp-script/test-data.sql
+npx wrangler d1 execute takoyaki-db --local --file tmp-script/test-data.sql
 ```
 
 ## テストアカウント
@@ -51,17 +51,17 @@ npx wrangler d1 execute medical-consultation-db --local --file tmp-script/test-d
 
 ```bash
 # drizzle-kit pushの代わりに、SQLファイルを直接実行
-npx wrangler d1 execute medical-consultation-db --local --file drizzle/push.sql
+npx wrangler d1 execute takoyaki-db --local --file drizzle/push.sql
 ```
 
 ### データの確認
 
 ```bash
 # 患者データの確認
-npx wrangler d1 execute medical-consultation-db --local --command "SELECT * FROM patients"
+npx wrangler d1 execute takoyaki-db --local --command "SELECT * FROM patients"
 
 # ビデオセッションの確認
-npx wrangler d1 execute medical-consultation-db --local --command "SELECT * FROM video_sessions"
+npx wrangler d1 execute takoyaki-db --local --command "SELECT * FROM video_sessions"
 ```
 
 ## 関連ドキュメント

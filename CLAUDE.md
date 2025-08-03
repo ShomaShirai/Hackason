@@ -65,8 +65,8 @@ npm run seed:local
 
 # D1ローカルデータ投入（簡易版）
 # 詳細は knowledge/technical/d1-local-data-setup.md を参照
-npx wrangler d1 execute medical-consultation-db --local --file drizzle/0000_hot_harrier.sql
-npx wrangler d1 execute medical-consultation-db --local --file tmp-script/test-data.sql
+npx wrangler d1 execute takoyaki-db --local --file drizzle/0000_hot_harrier.sql
+npx wrangler d1 execute takoyaki-db --local --file tmp-script/test-data.sql
 ```
 
 **その他のコマンド:**
