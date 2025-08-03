@@ -2,21 +2,20 @@
   "name": "medical-consultation-test",
   "main": "workers/app.ts",
   "compatibility_date": "2024-01-01",
-  "compatibility_flags": ["nodejs_compat"],
-
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "vars": {
     "NODE_ENV": "development"
   },
-
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "medical-consultation-db",
-      "database_id": "local",
-      "preview_database_id": "local"
+      "database_id": "504ec41d-56f4-41e5-afaa-0fb3ce095e59",
+      "preview_database_id": "504ec41d-56f4-41e5-afaa-0fb3ce095e59"
     }
   ],
-
   "durable_objects": {
     "bindings": [
       {
@@ -25,7 +24,6 @@
       }
     ]
   },
-
   "assets": {
     "directory": "public"
   }

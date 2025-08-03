@@ -1,10 +1,10 @@
-import type { Route } from "./+types/$id.questionnaire"
-import { useLoaderData, useNavigation, useNavigate } from "react-router"
-import { useState, useEffect } from "react"
-import { ErrorMessage } from "~/components/common/ErrorMessage"
+import { useEffect, useState } from "react"
+import { useLoaderData, useNavigate, useNavigation } from "react-router"
 import { RequireAuth } from "~/components/auth/RequireAuth"
+import { ErrorMessage } from "~/components/common/ErrorMessage"
+import type { ApiError, QuestionnaireResponse, QuestionnaireTemplate } from "~/types/api"
 import { get, post } from "~/utils/api-client"
-import type { QuestionnaireResponse, QuestionnaireTemplate, ApiError } from "~/types/api"
+import type { Route } from "./+types/$id.questionnaire"
 
 interface LoaderData {
   questionnaire: QuestionnaireResponse['questionnaire'] | null
@@ -51,7 +51,7 @@ export async function action({ request: _request, params }: Route.ActionArgs) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: request.headers.get("Authorization") || "",
+          Authorization: _request.headers.get("Authorization") || "",
         },
         body: JSON.stringify({
           appointmentId: parseInt(appointmentId),
@@ -259,9 +259,8 @@ export default function Questionnaire() {
             </div>
             <div className="w-full bg-gray-200 rounded-full h-2">
               <div
-                className={`h-2 rounded-full transition-all duration-300 ${
-                  isCompleted ? 'bg-green-600' : 'bg-blue-600'
-                }`}
+                className={`h-2 rounded-full transition-all duration-300 ${isCompleted ? 'bg-green-600' : 'bg-blue-600'
+                  }`}
                 style={{ width: `${progress}%` }}
               />
             </div>

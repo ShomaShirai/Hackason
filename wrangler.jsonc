@@ -3,7 +3,7 @@
  * https://developers.cloudflare.com/workers/wrangler/configuration/
  */ {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "fd-qiita-hackathon-2025",
+  "name": "takoyaki",
   "compatibility_date": "2024-09-23",
   "compatibility_flags": [
     "nodejs_compat"
@@ -36,8 +36,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "medical-consultation-db",
-      "database_id": "bc27a088-a901-4d07-8d6f-894dfa03cef4",
+      "database_name": "takoyaki-db",
+      "database_id": "186729c3-c2ad-4079-bbca-6d9b3ad70c30",
       "migrations_dir": "./drizzle"
     }
   ],
