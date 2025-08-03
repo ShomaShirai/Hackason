@@ -165,6 +165,17 @@ export default function NewAppointment() {
   const [speechRecognition, setSpeechRecognition] = useState<SpeechRecognition | null>(null)
   const [speechError, setSpeechError] = useState<string | null>(null)
 
+  // カメラ関連の状態
+  const [capturedImage, setCapturedImage] = useState<string | null>(null)
+  const [isCameraOpen, setIsCameraOpen] = useState(false)
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
+  const videoRef = React.useRef<HTMLVideoElement>(null)
+  const canvasRef = React.useRef<HTMLCanvasElement>(null)
+
+  // 舌診関連の状態
+  const [tongueAnalysisResult, setTongueAnalysisResult] = useState<any>(null)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+
   const isSubmitting = navigation.state === "submitting"
 
   // 診療科リスト（実際はAPIから取得）
@@ -259,6 +270,8 @@ export default function NewAppointment() {
           endTime: selectedSlot.endTime,
           appointmentType,
           chiefComplaint,
+          hasImage: !!capturedImage,
+          imageData: capturedImage,
         }),
       })
 
@@ -488,6 +501,203 @@ export default function NewAppointment() {
       setIsListening(false)
     }
   }
+
+  // カメラを開く関数
+  const openCamera = async () => {
+    console.log("🎥 カメラ起動を開始...")
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      console.error("❌ このブラウザはgetUserMediaをサポートしていません")
+      setSlotsError("このブラウザはカメラ機能をサポートしていません。")
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false
+      })
+
+      console.log("✅ カメラストリーム取得成功:", stream)
+      setCameraStream(stream)
+      setIsCameraOpen(true)
+
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          videoRef.current.play().catch(console.error)
+        }
+      }, 200)
+
+    } catch (error) {
+      console.error("❌ カメラアクセス失敗:", error)
+      let errorMessage = "カメラにアクセスできませんでした。"
+
+      if (error instanceof Error) {
+        switch (error.name) {
+          case 'NotAllowedError':
+            errorMessage += " カメラの使用許可を与えてください。"
+            break
+          case 'NotFoundError':
+            errorMessage += " カメラデバイスが見つかりませんでした。"
+            break
+          case 'NotReadableError':
+            errorMessage += " カメラが他のアプリケーションで使用中です。"
+            break
+          default:
+            errorMessage += ` エラー: ${error.message}`
+        }
+      }
+      setSlotsError(errorMessage)
+    }
+  }
+
+  // カメラを閉じる関数
+  const closeCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop())
+      setCameraStream(null)
+    }
+    setIsCameraOpen(false)
+  }
+
+  // 写真撮影関数
+  const takePhoto = async () => {
+    console.log('📸 写真撮影開始...')
+
+    if (videoRef.current && canvasRef.current) {
+      const canvas = canvasRef.current
+      const video = videoRef.current
+
+      console.log('📐 ビデオサイズ:', {
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        readyState: video.readyState,
+        currentTime: video.currentTime,
+        paused: video.paused,
+        ended: video.ended
+      })
+
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        ctx.drawImage(video, 0, 0)
+        const imageDataUrl = canvas.toDataURL('image/png')
+
+        console.log('🖼️ 画像データ生成:', {
+          dataUrlLength: imageDataUrl.length,
+          format: imageDataUrl.substring(0, 30) + '...',
+          canvasSize: `${canvas.width}x${canvas.height}`,
+          isValidDataUrl: imageDataUrl.startsWith('data:image/')
+        })
+
+        setCapturedImage(imageDataUrl)
+        closeCamera()
+
+        // 舌診分析を自動実行
+        console.log('📸 写真撮影完了 - 舌診分析を開始します')
+        try {
+          await performTongueDiagnosis(imageDataUrl)
+        } catch (error) {
+          console.error('❌ takePhoto内での舌診分析エラー:', error)
+          setSlotsError(`舌診分析に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`)
+        }
+      } else {
+        console.error('❌ Canvas context取得失敗')
+        setSlotsError('画像の処理に失敗しました。もう一度お試しください。')
+      }
+    } else {
+      console.error('❌ Video または Canvas 要素が見つかりません:', {
+        video: !!videoRef.current,
+        canvas: !!canvasRef.current,
+        videoElement: videoRef.current,
+        canvasElement: canvasRef.current
+      })
+      setSlotsError('カメラまたはキャンバス要素が見つかりません。')
+    }
+  }
+
+  // 撮影した写真を削除する関数
+  const deleteImage = () => {
+    setCapturedImage(null)
+    setTongueAnalysisResult(null)
+  }
+
+  // 舌診分析を実行する関数
+  const performTongueDiagnosis = async (imageData: string) => {
+    console.log('🔍 舌診分析実行中...')
+    setIsAnalyzing(true)
+
+    try {
+      const token = getAuthToken('/patient')
+      if (!token) {
+        throw new Error('認証トークンが見つかりません')
+      }
+
+      const requestBody = {
+        imageData: imageData,
+        symptoms: chiefComplaint,
+        patientContext: {
+          appointmentType,
+          chiefComplaint
+        }
+      }
+
+      console.log('📤 舌診分析リクエスト送信:', {
+        hasImageData: !!imageData,
+        hasSymptoms: !!chiefComplaint,
+        appointmentType
+      })
+
+      const response = await fetch('/api/tongue-diagnosis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(requestBody)
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('❌ 舌診分析API失敗:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText
+        })
+        throw new Error(`舌診分析に失敗しました: ${response.status} ${errorText}`)
+      }
+
+      const result = await response.json() as { analysis: any }
+      console.log('✅ 舌診分析結果:', result)
+
+      if (!result) {
+        throw new Error(`舌診分析エラー:`)
+      }
+
+      setTongueAnalysisResult(result.analysis)
+      setSlotsError('✅ AI舌診分析が完了しました。分析結果が予約に含まれます。')
+
+    } catch (error) {
+      console.error('❌ 舌診分析失敗:', error)
+      setSlotsError(`舌診分析に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`)
+      setCapturedImage(null)
+      setTongueAnalysisResult(null)
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
+  // コンポーネントがアンマウントされる時にカメラを停止
+  React.useEffect(() => {
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop())
+      }
+    }
+  }, [cameraStream])
 
   return (
     <RequireAuth>
@@ -793,6 +1003,152 @@ export default function NewAppointment() {
                   )}
                 </div>
 
+                {/* カメラ機能セクション */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    舌の写真（任意・診断の参考資料として使用されます）
+                  </label>
+
+                  {!capturedImage && !isCameraOpen && (
+                    <button
+                      type="button"
+                      onClick={openCamera}
+                      className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      舌の写真を撮る
+                    </button>
+                  )}
+
+                  {isCameraOpen && (
+                    <div className="space-y-4">
+                      <div className="text-center">
+                        <p className="text-sm text-gray-600 mb-2">舌を画面中央に映して撮影してください</p>
+                      </div>
+
+                      <div className="relative bg-gray-900 rounded-lg overflow-hidden border-4 border-blue-300 mx-auto" style={{ maxWidth: '500px' }}>
+                        <video
+                          ref={videoRef}
+                          autoPlay
+                          playsInline
+                          muted
+                          className="w-full h-auto block"
+                          style={{
+                            minHeight: '300px',
+                            backgroundColor: '#1f2937'
+                          }}
+                        />
+                        <canvas
+                          ref={canvasRef}
+                          className="hidden"
+                        />
+
+                        <div className="absolute top-4 left-4 bg-green-500 text-white px-3 py-1 rounded-full text-sm font-bold">
+                          {cameraStream ? '🟢 カメラON' : '🔴 カメラOFF'}
+                        </div>
+
+                        {cameraStream && (
+                          <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-bold animate-pulse">
+                            ● 録画中
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex justify-center gap-4">
+                        <button
+                          type="button"
+                          onClick={takePhoto}
+                          disabled={!cameraStream || isAnalyzing}
+                          className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-400 flex items-center gap-2 font-semibold"
+                        >
+                          <span className="text-xl">📸</span>
+                          {isAnalyzing ? '分析中...' : '写真を撮る'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={closeCamera}
+                          className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-semibold"
+                        >
+                          キャンセル
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {capturedImage && (
+                    <div className="mt-4">
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">撮影した舌の写真</h4>
+                      <div className="relative inline-block">
+                        <img
+                          src={capturedImage}
+                          alt="舌の写真"
+                          className="w-48 h-32 object-cover rounded-lg border shadow-md"
+                        />
+                        <button
+                          type="button"
+                          onClick={deleteImage}
+                          className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs hover:bg-red-600 flex items-center justify-center"
+                        >
+                          ×
+                        </button>
+                      </div>
+
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            deleteImage()
+                            openCamera()
+                          }}
+                          className="text-sm text-blue-500 hover:text-blue-700 underline"
+                        >
+                          写真を撮り直す
+                        </button>
+                      </div>
+
+                      {/* 舌診分析結果の表示 */}
+                      {tongueAnalysisResult && (
+                        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                          <h4 className="text-sm font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            AI舌診分析結果
+                          </h4>
+                          <div className="space-y-2 text-sm">
+                            <div>
+                              <span className="font-medium text-gray-700">色：</span>
+                              <span className="text-gray-600 ml-1">{tongueAnalysisResult.color}</span>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-700">状態：</span>
+                              <span className="text-gray-600 ml-1">{tongueAnalysisResult.condition}</span>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-700">形状：</span>
+                              <span className="text-gray-600 ml-1">{tongueAnalysisResult.shape}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 分析中のローディング表示 */}
+                      {isAnalyzing && (
+                        <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-500"></div>
+                            <span className="text-sm text-yellow-700 font-medium">AI舌診分析中...</span>
+                          </div>
+                          <p className="text-xs text-yellow-600 mt-1">画像を分析しています。しばらくお待ちください。</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="bg-gray-50 p-4 rounded-md">
                   <h3 className="font-medium mb-2">予約内容確認</h3>
                   <dl className="text-sm space-y-1">
@@ -808,6 +1164,12 @@ export default function NewAppointment() {
                       <dt className="font-medium mr-2">診察種別：</dt>
                       <dd>{appointmentType === "initial" ? "初診" : "再診"}</dd>
                     </div>
+                    {capturedImage && (
+                      <div className="flex">
+                        <dt className="font-medium mr-2">舌の写真：</dt>
+                        <dd>撮影済み</dd>
+                      </div>
+                    )}
                   </dl>
                 </div>
 
@@ -817,6 +1179,8 @@ export default function NewAppointment() {
                     onClick={() => {
                       setSelectedDoctor(null)
                       setSelectedSlot(null)
+                      setCapturedImage(null)
+                      closeCamera()
                     }}
                     className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
                   >
