@@ -154,3 +154,5 @@ function parseDifyResponse(difyResponse: any) {
     }
   }
 }
+
+export default symptomAnalysisRouter
