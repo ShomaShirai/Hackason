@@ -3,8 +3,8 @@
  * P2P接続の確立、メディアストリーム管理、シグナリング処理を統合
  */
 
-import { RealtimeSignalingService } from './realtime-signaling';
 import type { SignalingCallbacks } from './realtime-signaling';
+import { RealtimeSignalingService } from './realtime-signaling';
 
 export interface WebRTCConfig {
   iceServers: RTCIceServer[];
@@ -41,6 +41,18 @@ export interface ConnectionMetrics {
   remoteCandidateProtocol?: string;
 }
 
+export interface MediaStreams {
+  audioStream: MediaStream | null;
+  videoStream: MediaStream | null;
+  screenStream: MediaStream | null;
+}
+
+export interface MediaTracks {
+  audioTrack: MediaStreamTrack | null;
+  videoTrack: MediaStreamTrack | null;
+  screenTrack: MediaStreamTrack | null;
+}
+
 export class WebRTCManager {
   private peerConnection: RTCPeerConnection | null = null;
   private localStream: MediaStream | null = null;
@@ -75,6 +87,20 @@ export class WebRTCManager {
   private readonly heartbeatIntervalMs = 5000;
   private readonly heartbeatTimeoutMs = 30000; // 15秒→30秒に延長
 
+  private streams: MediaStreams = {
+    audioStream: null,
+    videoStream: null,
+    screenStream: null
+  };
+
+  private tracks: MediaTracks = {
+    audioTrack: null,
+    videoTrack: null,
+    screenTrack: null
+  };
+
+  private isInitialized = false;
+
   constructor(sessionId: string, userId: string, callbacks: WebRTCCallbacks, config?: Partial<WebRTCConfig>) {
     this.sessionId = sessionId;
     this.userId = userId;
@@ -85,9 +111,6 @@ export class WebRTCManager {
     }
   }
 
-  /**
-   * WebRTC接続を初期化
-   */
   async initialize(token: string, isInitiator: boolean = false): Promise<void> {
     this.isInitiator = isInitiator;
 
@@ -157,7 +180,7 @@ export class WebRTCManager {
           frameRate: { ideal: 30, max: 30 }, // 安定性重視
           facingMode: 'user',
           // ビデオ品質の最適化
-          aspectRatio: { ideal: 16/9 },
+          aspectRatio: { ideal: 16 / 9 },
           // resizeMode: 'crop-and-scale' // MediaTrackConstraintsには存在しない
         },
         audio: this.config.audioConstraints || {
@@ -175,6 +198,23 @@ export class WebRTCManager {
 
       console.log('[Media] Requesting user media with constraints:', constraints);
       this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // トラックを分離して管理
+      const audioTrack = this.localStream.getAudioTracks()[0];
+      const videoTrack = this.localStream.getVideoTracks()[0];
+
+      if (audioTrack) {
+        this.tracks.audioTrack = audioTrack;
+        this.streams.audioStream = new MediaStream([audioTrack]);
+        // 音声トラックを初期状態で無効にする
+        audioTrack.enabled = false;
+        console.log('[Media] Audio track disabled by default');
+      }
+
+      if (videoTrack) {
+        this.tracks.videoTrack = videoTrack;
+        this.streams.videoStream = new MediaStream([videoTrack]);
+      }
 
       // 取得したトラックの設定を確認
       this.localStream.getTracks().forEach(track => {
@@ -214,7 +254,7 @@ export class WebRTCManager {
    * PeerConnectionのイベントハンドラーを設定
    */
   private setupPeerConnectionEventHandlers(): void {
-    if (!this.peerConnection) {return;}
+    if (!this.peerConnection) { return; }
 
     // ICE候補が生成されたとき
     this.peerConnection.onicecandidate = (event) => {
@@ -377,7 +417,7 @@ export class WebRTCManager {
    * データチャンネルを作成
    */
   private createDataChannel(): void {
-    if (!this.peerConnection) {return;}
+    if (!this.peerConnection) { return; }
 
     this.dataChannel = this.peerConnection.createDataChannel('medical-data', {
       ordered: true
@@ -490,26 +530,113 @@ export class WebRTCManager {
     }
   }
 
-  /**
-   * ビデオのミュート/アンミュート
-   */
+  // 音声のオン/オフ切り替え
+  toggleAudio(enabled: boolean): void {
+    if (!this.tracks.audioTrack) {
+      console.warn('Audio track not available');
+      return;
+    }
+
+    this.tracks.audioTrack.enabled = enabled;
+    console.log(`Audio ${enabled ? 'enabled' : 'disabled'}`);
+  }
+
+  // ビデオのオン/オフ切り替え
   toggleVideo(enabled: boolean): void {
-    if (this.localStream) {
-      this.localStream.getVideoTracks().forEach(track => {
-        track.enabled = enabled;
+    if (!this.tracks.videoTrack) {
+      console.warn('Video track not available');
+      return;
+    }
+
+    this.tracks.videoTrack.enabled = enabled;
+    console.log(`Video ${enabled ? 'enabled' : 'disabled'}`);
+  }
+
+  // 画面共有の開始
+  async startScreenShare(): Promise<MediaStream | null> {
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false
       });
+
+      const screenTrack = screenStream.getVideoTracks()[0];
+      this.tracks.screenTrack = screenTrack;
+      this.streams.screenStream = screenStream;
+
+      // 画面共有終了時の処理
+      screenTrack.onended = () => {
+        console.log('Screen sharing ended');
+        this.stopScreenShare();
+      };
+
+      console.log('Screen sharing started');
+      return screenStream;
+    } catch (error) {
+      console.error('Failed to start screen sharing:', error);
+      return null;
     }
   }
 
-  /**
-   * 音声のミュート/アンミュート
-   */
-  toggleAudio(enabled: boolean): void {
-    if (this.localStream) {
-      this.localStream.getAudioTracks().forEach(track => {
-        track.enabled = enabled;
-      });
+  // 画面共有の停止
+  stopScreenShare(): void {
+    if (this.tracks.screenTrack) {
+      this.tracks.screenTrack.stop();
+      this.tracks.screenTrack = null;
+      this.streams.screenStream = null;
+      console.log('Screen sharing stopped');
     }
+  }
+
+  // メディアストリームの取得
+  getAudioStream(): MediaStream | null {
+    return this.streams.audioStream;
+  }
+
+  getVideoStream(): MediaStream | null {
+    return this.streams.videoStream;
+  }
+
+  getScreenStream(): MediaStream | null {
+    return this.streams.screenStream;
+  }
+
+  // 全ストリームの停止
+  stopAllStreams(): void {
+    Object.values(this.tracks).forEach(track => {
+      if (track) {
+        track.stop();
+      }
+    });
+
+    this.tracks = {
+      audioTrack: null,
+      videoTrack: null,
+      screenTrack: null
+    };
+
+    this.streams = {
+      audioStream: null,
+      videoStream: null,
+      screenStream: null
+    };
+
+    this.isInitialized = false;
+    console.log('All streams stopped');
+  }
+
+  // 初期化状態の確認
+  isReady(): boolean {
+    return this.isInitialized;
+  }
+
+  // 現在のトラック状態を取得
+  getTrackStates() {
+    return {
+      audioEnabled: this.tracks.audioTrack?.enabled ?? false,
+      videoEnabled: this.tracks.videoTrack?.enabled ?? false,
+      screenSharing: this.tracks.screenTrack !== null
+    };
   }
 
   /**
@@ -565,10 +692,10 @@ export class WebRTCManager {
    * ビデオ品質を調整
    */
   async adjustVideoQuality(quality: 'high' | 'medium' | 'low'): Promise<void> {
-    if (!this.localStream || !this.peerConnection) {return;}
+    if (!this.localStream || !this.peerConnection) { return; }
 
     const videoTrack = this.localStream.getVideoTracks()[0];
-    if (!videoTrack) {return;}
+    if (!videoTrack) { return; }
 
     // 品質プリセット
     const qualitySettings = {
@@ -609,7 +736,7 @@ export class WebRTCManager {
    * 詳細な接続メトリクスを収集
    */
   async collectConnectionMetrics(): Promise<ConnectionMetrics | null> {
-    if (!this.peerConnection) {return null;}
+    if (!this.peerConnection) { return null; }
 
     const stats = await this.peerConnection.getStats();
     const metrics: ConnectionMetrics = {
@@ -675,7 +802,7 @@ export class WebRTCManager {
    */
   async monitorConnectionQuality(): Promise<void> {
     const metrics = await this.collectConnectionMetrics();
-    if (!metrics) {return;}
+    if (!metrics) { return; }
 
     // メトリクスをコールバックで通知
     this.callbacks.onConnectionMetrics?.(metrics);
@@ -741,7 +868,7 @@ export class WebRTCManager {
       this.iceCandidateGatheringTimeout = null;
     }
 
-    if (this.iceCandidates.length === 0) {return;}
+    if (this.iceCandidates.length === 0) { return; }
 
     // 候補を優先度でソート（高い優先度が先）
     const sortedCandidates = [...this.iceCandidates].sort((a, b) => {
@@ -777,7 +904,7 @@ export class WebRTCManager {
    * 接続切断時の処理
    */
   private handleDisconnection(): void {
-    if (this.isReconnecting) {return;}
+    if (this.isReconnecting) { return; }
 
     this.isReconnecting = true;
     this.reconnectAttempts++;
@@ -988,3 +1115,11 @@ export class WebRTCManager {
     this.handleDisconnection();
   }
 }
+
+// シングルトンインスタンス（必要な引数を提供）
+export const webrtcManager = new WebRTCManager(
+  '', // sessionId - 使用時に設定
+  '', // userId - 使用時に設定
+  {}, // callbacks - 使用時に設定
+  {} // config - 使用時に設定
+);

@@ -1,11 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { useAuth } from '~/contexts/AuthContext';
-import { Loading } from '~/components/common/Loading';
 import { ErrorMessage } from '~/components/common/ErrorMessage';
-import { get } from '~/utils/api-client';
-import { formatDateTime } from '~/utils/date';
+import { Loading } from '~/components/common/Loading';
+import { useAuth } from '~/contexts/AuthContext';
 import type { PatientAppointmentsResponse } from '~/types/api';
+import { get } from '~/utils/api-client';
 
 export function meta() {
   return [
@@ -69,14 +68,14 @@ export default function PatientAppointments() {
   }, [currentPage, statusFilter, navigate]);
 
   const handleStatusChange = (status: string) => {
-    const params = new URLSearchParams(searchParams);
+    const newSearchParams = new URLSearchParams(searchParams);
     if (status) {
-      params.set('status', status);
+      newSearchParams.set('status', status);
     } else {
-      params.delete('status');
+      newSearchParams.delete('status');
     }
-    params.set('page', '1'); // フィルタ変更時はページをリセット
-    setSearchParams(params);
+    newSearchParams.set('page', '1');
+    setSearchParams(newSearchParams);
   };
 
   const handlePageChange = (page: number) => {
@@ -105,11 +104,10 @@ export default function PatientAppointments() {
 
 
   const formatDuration = (startedAt: string | null, endedAt: string | null) => {
-    if (!startedAt || !endedAt) {
-      return null;
-    }
-    const duration = new Date(endedAt).getTime() - new Date(startedAt).getTime();
-    const minutes = Math.floor(duration / 60000);
+    if (!startedAt || !endedAt) return '不明';
+    const start = new Date(startedAt);
+    const end = new Date(endedAt);
+    const minutes = Math.floor((end.getTime() - start.getTime()) / 1000 / 60);
     return `${minutes}分`;
   };
 
@@ -186,7 +184,13 @@ export default function PatientAppointments() {
                   <div className="flex-1">
                     <div className="flex items-center mb-2">
                       <span className="text-lg font-medium text-gray-900">
-                        {formatDateTime(appointment.scheduledAt)}
+                        {new Date(appointment.scheduledAt).toLocaleString('ja-JP', {
+                          month: 'numeric',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          timeZone: 'Asia/Tokyo',
+                        })}
                       </span>
                       <span className="ml-3">{getStatusBadge(appointment.status)}</span>
                     </div>
@@ -198,7 +202,7 @@ export default function PatientAppointments() {
                       <div>
                         <span className="font-medium">診察種別:</span> {
                           appointment.appointmentType === 'initial' ? '初診' :
-                          appointment.appointmentType === 'follow_up' ? '再診' : '緊急'
+                            appointment.appointmentType === 'follow_up' ? '再診' : '緊急'
                         }
                       </div>
                       {appointment.doctor && (
@@ -282,11 +286,10 @@ export default function PatientAppointments() {
               <button
                 onClick={() => handlePageChange(currentPage - 1)}
                 disabled={!pagination.hasPreviousPage}
-                className={`relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium ${
-                  pagination.hasPreviousPage
-                    ? 'text-gray-500 hover:bg-gray-50'
-                    : 'text-gray-300 cursor-not-allowed'
-                }`}
+                className={`relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium ${pagination.hasPreviousPage
+                  ? 'text-gray-500 hover:bg-gray-50'
+                  : 'text-gray-300 cursor-not-allowed'
+                  }`}
               >
                 <span className="sr-only">前へ</span>
                 <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
@@ -309,11 +312,10 @@ export default function PatientAppointments() {
                   <button
                     key={pageNumber}
                     onClick={() => handlePageChange(pageNumber)}
-                    className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
-                      pageNumber === currentPage
-                        ? 'z-10 bg-blue-50 border-blue-500 text-blue-600'
-                        : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
-                    }`}
+                    className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${pageNumber === currentPage
+                      ? 'z-10 bg-blue-50 border-blue-500 text-blue-600'
+                      : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
+                      }`}
                   >
                     {pageNumber}
                   </button>
@@ -323,11 +325,10 @@ export default function PatientAppointments() {
               <button
                 onClick={() => handlePageChange(currentPage + 1)}
                 disabled={!pagination.hasNextPage}
-                className={`relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium ${
-                  pagination.hasNextPage
-                    ? 'text-gray-500 hover:bg-gray-50'
-                    : 'text-gray-300 cursor-not-allowed'
-                }`}
+                className={`relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium ${pagination.hasNextPage
+                  ? 'text-gray-500 hover:bg-gray-50'
+                  : 'text-gray-300 cursor-not-allowed'
+                  }`}
               >
                 <span className="sr-only">次へ</span>
                 <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">

@@ -54,7 +54,9 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["SignalingRoom"]
+      "new_sqlite_classes": [
+        "SignalingRoom"
+      ]
     }
   ],
   /**
@@ -78,21 +80,15 @@
    * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
    */
   // "services": [{ "binding": "MY_SERVICE", "service": "my-service" }]
-  "upload_source_maps": true,
   /**
    * Build configuration for development
    * https://developers.cloudflare.com/workers/wrangler/configuration/#build
    */
   "build": {
     "command": "",
-    "watch_dir": ["workers", "app"],
-    "upload_source_maps": true
-  },
-  /**
-   * esbuild configuration for source maps
-   */
-  "esbuild": {
-    "sourcemap": true,
-    "keepNames": true
+    "watch_dir": [
+      "workers",
+      "app"
+    ]
   }
 }

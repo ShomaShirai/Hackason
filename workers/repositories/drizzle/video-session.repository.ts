@@ -1,14 +1,14 @@
-import { eq, and } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { LibSQLDatabase } from 'drizzle-orm/libsql'
 import { videoSessions } from '../../db/schema'
-import type { VideoSessionRepository } from '../interfaces'
 import type { VideoSession } from '../../db/types'
+import type { VideoSessionRepository } from '../interfaces'
 
 type Database = DrizzleD1Database | LibSQLDatabase
 
 export class DrizzleVideoSessionRepository implements VideoSessionRepository {
-  constructor(private db: Database) {}
+  constructor(private db: Database) { }
 
   async findById(id: string): Promise<VideoSession | null> {
     const results = await this.db
@@ -25,11 +25,11 @@ export class DrizzleVideoSessionRepository implements VideoSessionRepository {
     let query = this.db.select().from(videoSessions)
 
     if (options?.limit) {
-      query = query.limit(options.limit)
+      query = query.limit(options.limit) as any
     }
 
     if (options?.offset) {
-      query = query.offset(options.offset)
+      query = query.offset(options.offset) as any
     }
 
     return await query.all()
@@ -81,7 +81,7 @@ export class DrizzleVideoSessionRepository implements VideoSessionRepository {
     return result[0] ?? null
   }
 
-  async create(data: Omit<VideoSession, 'updatedAt'> & { id: string }): Promise<VideoSession> {
+  async create(data: Omit<VideoSession, 'id'> & { id: string }): Promise<VideoSession> {
     const result = await this.db
       .insert(videoSessions)
       .values({
@@ -106,10 +106,7 @@ export class DrizzleVideoSessionRepository implements VideoSessionRepository {
   async update(id: string, data: Partial<VideoSession>): Promise<VideoSession | null> {
     const result = await this.db
       .update(videoSessions)
-      .set({
-        ...data,
-        updatedAt: new Date()
-      })
+      .set(data)
       .where(eq(videoSessions.id, id))
       .returning()
       .all()

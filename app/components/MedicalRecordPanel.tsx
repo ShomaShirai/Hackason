@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { getAuthToken } from '../utils/auth';
 import PrescriptionSection from './PrescriptionSection';
 
@@ -8,6 +8,9 @@ interface MedicalRecordPanelProps {
   isCollapsible?: boolean;
   defaultExpanded?: boolean;
   className?: string;
+  onAutoSaveStatusChange?: (status: { isAutoSaving: boolean; lastAutoSaved: Date | null }) => void;
+  externalAutoSaveStatus?: { isAutoSaving: boolean; lastAutoSaved: Date | null };
+  externalTranscript?: string; // 外部からの字幕データ
 }
 
 interface MedicalRecordData {
@@ -15,6 +18,7 @@ interface MedicalRecordData {
   objective: string;
   assessment: string;
   plan: string;
+  transcript?: string; // 音声認識字幕
   vitalSigns?: {
     temperature?: number;
     bloodPressure?: {
@@ -42,6 +46,15 @@ interface SaveStatus {
   isSaving: boolean;
   lastSaved: Date | null;
   hasUnsavedChanges: boolean;
+  isAutoSaving?: boolean; // 自動保存状態
+  lastAutoSaved?: Date | null; // 最後の自動保存時刻
+}
+
+interface ToastNotification {
+  id: string;
+  type: 'success' | 'error';
+  message: string;
+  timestamp: Date;
 }
 
 export const MedicalRecordPanel = memo(function MedicalRecordPanel({
@@ -49,7 +62,10 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
   onClose,
   isCollapsible = true,
   defaultExpanded = true,
-  className = ''
+  className = '',
+  onAutoSaveStatusChange,
+  externalAutoSaveStatus,
+  externalTranscript
 }: MedicalRecordPanelProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [loading, setLoading] = useState(false);
@@ -58,14 +74,20 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({
     isSaving: false,
     lastSaved: null,
-    hasUnsavedChanges: false
+    hasUnsavedChanges: false,
+    isAutoSaving: false,
+    lastAutoSaved: null
   });
+
+  // トースト通知の状態管理
+  const [toastNotifications, setToastNotifications] = useState<ToastNotification[]>([]);
 
   const [formData, setFormData] = useState<MedicalRecordData>({
     subjective: '',
     objective: '',
     assessment: '',
     plan: '',
+    transcript: '', // 音声認識字幕
     vitalSigns: {
       temperature: undefined,
       bloodPressure: {
@@ -90,6 +112,34 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
     prescriptions: false
   });
 
+  // 自動保存状態を親コンポーネントに通知
+  useEffect(() => {
+    if (onAutoSaveStatusChange) {
+      onAutoSaveStatusChange({
+        isAutoSaving: saveStatus.isAutoSaving || false,
+        lastAutoSaved: saveStatus.lastAutoSaved || null
+      });
+    }
+  }, [saveStatus.isAutoSaving, saveStatus.lastAutoSaved, onAutoSaveStatusChange]);
+
+  // 外部から自動保存状態を受け取る
+  useEffect(() => {
+    if (externalAutoSaveStatus) {
+      setSaveStatus(prev => ({
+        ...prev,
+        isAutoSaving: externalAutoSaveStatus.isAutoSaving,
+        lastAutoSaved: externalAutoSaveStatus.lastAutoSaved
+      }));
+    }
+  }, [externalAutoSaveStatus]);
+
+  // 外部から字幕データを受け取る
+  useEffect(() => {
+    if (externalTranscript) {
+      setFormData(prev => ({ ...prev, transcript: externalTranscript }));
+    }
+  }, [externalTranscript]);
+
   // 既存のカルテデータを取得
   useEffect(() => {
     fetchExistingRecord();
@@ -110,7 +160,30 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
       });
 
       if (response.ok) {
-        const data = await response.json();
+        const data = await response.json() as {
+          record?: {
+            id?: number;
+            appointmentId: number;
+            subjective: string;
+            objective: string;
+            assessment: string;
+            plan: string;
+            transcript?: string;
+            vitalSigns?: {
+              temperature?: number;
+              bloodPressure?: {
+                systolic: number;
+                diastolic: number;
+              };
+              pulse?: number;
+              respiratoryRate?: number;
+              oxygenSaturation?: number;
+            };
+            prescriptions?: PrescriptionMedication[];
+            createdAt?: string;
+            updatedAt?: string;
+          };
+        };
         setExistingRecord(data.record);
 
         // 既存データがある場合はフォームに設定
@@ -174,7 +247,23 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
         throw new Error('保存に失敗しました');
       }
 
-      const result = await response.json();
+      const result = await response.json() as {
+        success: boolean;
+        message?: string;
+        record?: {
+          id: number;
+          appointmentId: number;
+          subjective: string;
+          objective: string;
+          assessment: string;
+          plan: string;
+          transcript?: string;
+          vitalSigns?: any;
+          prescriptions?: any[];
+          createdAt: string;
+          updatedAt: string;
+        };
+      };
       if (!existingRecord) {
         setExistingRecord(result.record);
       }
@@ -221,10 +310,115 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
       ...prev,
       vitalSigns: {
         ...prev.vitalSigns,
-        [field]: value
-      }
+        [field]: value,
+      },
     }));
   };
+
+  // 手動保存機能
+  const handleManualSave = useCallback(async () => {
+    try {
+      setSaveStatus(prev => ({ ...prev, isSaving: true }));
+
+      const token = getAuthToken();
+      if (!token) {
+        throw new Error('認証エラー');
+      }
+
+      const url = existingRecord
+        ? `/api/worker/medical-records/${existingRecord.id}`
+        : '/api/worker/medical-records';
+
+      const method = existingRecord ? 'PUT' : 'POST';
+
+      const requestBody = {
+        appointmentId: parseInt(appointmentId),
+        ...formData,
+      };
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        throw new Error('保存に失敗しました');
+      }
+
+      const result = await response.json() as {
+        success: boolean;
+        message?: string;
+        record?: {
+          id: number;
+          appointmentId: number;
+          subjective: string;
+          objective: string;
+          assessment: string;
+          plan: string;
+          transcript?: string;
+          vitalSigns?: any;
+          prescriptions?: any[];
+          createdAt: string;
+          updatedAt: string;
+        };
+      };
+
+      if (!existingRecord) {
+        setExistingRecord(result.record);
+      }
+
+      setSaveStatus({
+        isSaving: false,
+        lastSaved: new Date(),
+        hasUnsavedChanges: false
+      });
+
+      setError(null);
+
+      // 保存成功のトースト通知を追加
+      const successToast: ToastNotification = {
+        id: Date.now().toString(),
+        type: 'success',
+        message: 'カルテを保存しました',
+        timestamp: new Date()
+      };
+      setToastNotifications(prev => [...prev, successToast]);
+
+      // 3秒後にトースト通知を自動削除
+      setTimeout(() => {
+        setToastNotifications(prev => prev.filter(toast => toast.id !== successToast.id));
+      }, 3000);
+
+      console.log('✅ カルテを保存しました');
+    } catch (err) {
+      console.error('Manual save error:', err);
+      setSaveStatus(prev => ({ ...prev, isSaving: false }));
+      setError(err instanceof Error ? err.message : '保存に失敗しました');
+
+      // エラーのトースト通知を追加
+      const errorToast: ToastNotification = {
+        id: Date.now().toString(),
+        type: 'error',
+        message: err instanceof Error ? err.message : '保存に失敗しました',
+        timestamp: new Date()
+      };
+      setToastNotifications(prev => [...prev, errorToast]);
+
+      // 5秒後にエラートースト通知を自動削除
+      setTimeout(() => {
+        setToastNotifications(prev => prev.filter(toast => toast.id !== errorToast.id));
+      }, 5000);
+    }
+  }, [appointmentId, existingRecord, formData]);
+
+  // トースト通知を削除する関数
+  const removeToast = useCallback((toastId: string) => {
+    setToastNotifications(prev => prev.filter(toast => toast.id !== toastId));
+  }, []);
 
   // 処方箋データ変更ハンドラー（メモ化）
   const handlePrescriptionsChange = useCallback((newPrescriptions: PrescriptionMedication[]) => {
@@ -246,13 +440,13 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
   };
 
   const formatLastSaved = (date: Date | null) => {
-    if (!date) {return '';}
+    if (!date) { return ''; }
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const minutes = Math.floor(diff / 60000);
 
-    if (minutes < 1) {return '今保存しました';}
-    if (minutes < 60) {return `${minutes}分前に保存`;}
+    if (minutes < 1) { return '今保存しました'; }
+    if (minutes < 60) { return `${minutes}分前に保存`; }
     return date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
   };
 
@@ -281,6 +475,50 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
 
   return (
     <div className={`bg-white border border-gray-200 rounded-lg shadow-sm ${className}`}>
+      {/* トースト通知 */}
+      <div className="fixed top-4 right-4 z-50 space-y-2">
+        {toastNotifications.map((toast) => (
+          <div
+            key={toast.id}
+            className={`max-w-sm w-full bg-white shadow-lg rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden ${toast.type === 'success' ? 'border-l-4 border-green-500' : 'border-l-4 border-red-500'
+              }`}
+          >
+            <div className="p-4">
+              <div className="flex items-start">
+                <div className="flex-shrink-0">
+                  {toast.type === 'success' ? (
+                    <svg className="h-6 w-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  ) : (
+                    <svg className="h-6 w-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  )}
+                </div>
+                <div className="ml-3 w-0 flex-1 pt-0.5">
+                  <p className={`text-sm font-medium ${toast.type === 'success' ? 'text-green-800' : 'text-red-800'
+                    }`}>
+                    {toast.message}
+                  </p>
+                </div>
+                <div className="ml-4 flex-shrink-0 flex">
+                  <button
+                    onClick={() => removeToast(toast.id)}
+                    className="bg-white rounded-md inline-flex text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                  >
+                    <span className="sr-only">閉じる</span>
+                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
       {/* ヘッダー */}
       <div className="p-4 border-b border-gray-200">
         <div className="flex items-center justify-between">
@@ -315,6 +553,40 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
                 </svg>
               </button>
             )}
+            {/* 手動保存ボタン */}
+            <button
+              onClick={handleManualSave}
+              disabled={saveStatus.isSaving}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="カルテを保存"
+            >
+              {saveStatus.isSaving ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  保存中...
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                  </svg>
+                  保存
+                </div>
+              )}
+            </button>
+            {/* カルテ一覧へのリンクボタン */}
+            <a
+              href="/worker/doctor/medical-records"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors flex items-center gap-2"
+              title="カルテ一覧を開く"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              一覧
+            </a>
             {onClose && (
               <button
                 onClick={onClose}
@@ -408,6 +680,47 @@ export const MedicalRecordPanel = memo(function MedicalRecordPanel({
                     rows={3}
                     placeholder="治療方針、処方、フォローアップなど..."
                   />
+                </div>
+
+                {/* 音声認識字幕 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    🎤 音声認識字幕
+                  </label>
+                  <div className="relative">
+                    <textarea
+                      value={formData.transcript || ''}
+                      onChange={(e) => handleInputChange('transcript', e.target.value)}
+                      className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-blue-50"
+                      rows={4}
+                      placeholder="音声認識で生成された字幕がここに表示されます..."
+                      readOnly={!!externalTranscript} // 外部字幕がある場合は読み取り専用
+                    />
+                    {/* リアルタイム保存状態インジケーター */}
+                    <div className="absolute top-2 right-2 flex items-center gap-2">
+                      {saveStatus.isAutoSaving && (
+                        <div className="flex items-center gap-1 text-blue-600 text-xs">
+                          <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                          <span>自動保存中...</span>
+                        </div>
+                      )}
+                      {saveStatus.lastAutoSaved && !saveStatus.isAutoSaving && (
+                        <div className="text-green-600 text-xs">
+                          ✓ 自動保存済み
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between mt-1">
+                    <p className="text-xs text-gray-500">
+                      診察中の音声認識結果が自動的に保存されます
+                    </p>
+                    {saveStatus.lastAutoSaved && (
+                      <p className="text-xs text-gray-400">
+                        最終更新: {formatLastSaved(saveStatus.lastAutoSaved)}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

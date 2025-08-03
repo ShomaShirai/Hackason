@@ -1,4 +1,4 @@
-import { type RouteConfig, index, route, prefix } from '@react-router/dev/routes';
+import { type RouteConfig, index, prefix, route } from '@react-router/dev/routes';
 
 export default [
   // 公開ルート
@@ -26,6 +26,7 @@ export default [
       route('schedule', 'routes/worker.doctor.schedule.tsx'),
       route('consultation/:id', 'routes/worker/doctor/consultation/$id.tsx'),
       route('patients', 'routes/worker/doctor/patients.tsx'),
+      route('medical-records', 'routes/worker/doctor/medical-records/index.tsx'),
       route('medical-records/:id/edit', 'routes/worker/doctor/medical-records/$id.edit.tsx'),
     ]),
 

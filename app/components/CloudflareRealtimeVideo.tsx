@@ -7,6 +7,24 @@ interface CloudflareRealtimeVideoProps {
   userType: 'patient' | 'worker';
   onSessionEnd?: () => void;
   onConnectionMetrics?: (metrics: unknown) => void;
+  onToggleAudio?: (enabled: boolean) => void;
+  onToggleVideo?: (enabled: boolean) => void;
+  mediaControls?: MediaControls;
+  onRef?: (ref: { toggleAudio: (enabled: boolean) => void; toggleVideo: (enabled: boolean) => void; endCall: () => void } | null) => void;
+}
+
+interface AppointmentDetails {
+  appointment: {
+    id: number;
+    patient: {
+      id: number;
+      name: string;
+    };
+    doctor: {
+      id: number;
+      name: string;
+    } | null;
+  };
 }
 
 interface SessionData {
@@ -26,25 +44,83 @@ export function CloudflareRealtimeVideo({
   appointmentId,
   userType,
   onSessionEnd,
-  onConnectionMetrics: _onConnectionMetrics
+  onConnectionMetrics: _onConnectionMetrics,
+  onToggleAudio,
+  onToggleVideo,
+  mediaControls: externalMediaControls,
+  onRef
 }: CloudflareRealtimeVideoProps) {
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
-  const [, setLocalStream] = useState<MediaStream | null>(null);
+  const [appointmentDetails, setAppointmentDetails] = useState<AppointmentDetails | null>(null);
+
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [connectionState, setConnectionState] = useState<RTCPeerConnectionState>('new');
   const [iceConnectionState, setIceConnectionState] = useState<RTCIceConnectionState>('new');
-  const [mediaControls, setMediaControls] = useState<MediaControls>({ audio: true, video: true });
+  const [mediaControls, setMediaControls] = useState<MediaControls>({
+    audio: false, // デフォルトで音声オフ
+    video: false
+  });
+  const [localStream, setLocalStreamState] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showRetryButton, setShowRetryButton] = useState(false);
+  const [remoteVideoEnabled, setRemoteVideoEnabled] = useState(true);
+  const [remoteAudioEnabled, setRemoteAudioEnabled] = useState(true);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const webrtcManagerRef = useRef<WebRTCManager | null>(null);
 
+  // メディア制御機能
+  const toggleAudio = useCallback((enabled: boolean) => {
+    if (localStream) {
+      localStream.getAudioTracks().forEach(track => {
+        track.enabled = enabled;
+      });
+      setMediaControls(prev => ({ ...prev, audio: enabled }));
+      onToggleAudio?.(enabled);
+      console.log('音声切り替え:', enabled);
+    }
+  }, [localStream, onToggleAudio]);
+
+  const toggleVideo = useCallback((enabled: boolean) => {
+    if (localStream) {
+      localStream.getVideoTracks().forEach(track => {
+        track.enabled = enabled;
+      });
+      setMediaControls(prev => ({ ...prev, video: enabled }));
+      onToggleVideo?.(enabled);
+      console.log('ビデオ切り替え:', enabled);
+    }
+  }, [localStream, onToggleVideo]);
+
+  // 外部からのメディア制御を監視
+  useEffect(() => {
+    if (externalMediaControls) {
+      if (externalMediaControls.audio !== mediaControls.audio) {
+        toggleAudio(externalMediaControls.audio);
+      }
+      if (externalMediaControls.video !== mediaControls.video) {
+        toggleVideo(externalMediaControls.video);
+      }
+    }
+  }, [externalMediaControls, mediaControls.audio, mediaControls.video, toggleAudio, toggleVideo]);
+
+  // refを親コンポーネントに渡す
+  useEffect(() => {
+    onRef?.({
+      toggleAudio,
+      toggleVideo,
+      endCall: () => {
+        // endCall関数が定義されるまで一時的に空の関数を提供
+        console.warn('endCall not yet available');
+      }
+    });
+  }, [toggleAudio, toggleVideo, onRef]);
+
   // セッション作成または参加
   const initializeSession = useCallback(async () => {
-    console.log('🚀 initializeSession開始', { appointmentId });
+    console.log('🚀 initializeSession開始', { appointmentId, userType });
     setIsLoading(true);
     setError(null);
 
@@ -80,6 +156,7 @@ export function CloudflareRealtimeVideo({
 
       if (!response.ok) {
         const errorData = await response.json() as { error?: string };
+        console.error('❌ ビデオセッション作成エラー:', errorData);
         throw new Error(errorData.error || 'Failed to create session');
       }
 
@@ -121,7 +198,7 @@ export function CloudflareRealtimeVideo({
       const webrtcCallbacks: WebRTCCallbacks = {
         onLocalStream: (stream) => {
           console.log('📹 ローカルストリーム取得:', stream.id);
-          setLocalStream(stream);
+          setLocalStreamState(stream);
           if (localVideoRef.current) {
             localVideoRef.current.srcObject = stream;
           }
@@ -245,23 +322,7 @@ export function CloudflareRealtimeVideo({
     }
   }, [appointmentId, userType, _onConnectionMetrics]);
 
-  // 音声のオン/オフ切り替え
-  const toggleAudio = useCallback(() => {
-    if (webrtcManagerRef.current) {
-      const newState = !mediaControls.audio;
-      webrtcManagerRef.current.toggleAudio(newState);
-      setMediaControls(prev => ({ ...prev, audio: newState }));
-    }
-  }, [mediaControls.audio]);
 
-  // ビデオのオン/オフ切り替え
-  const toggleVideo = useCallback(() => {
-    if (webrtcManagerRef.current) {
-      const newState = !mediaControls.video;
-      webrtcManagerRef.current.toggleVideo(newState);
-      setMediaControls(prev => ({ ...prev, video: newState }));
-    }
-  }, [mediaControls.video]);
 
   // 通話終了
   const endCall = useCallback(async () => {
@@ -292,6 +353,15 @@ export function CloudflareRealtimeVideo({
     onSessionEnd?.();
   }, [sessionData, onSessionEnd]);
 
+  // endCall関数が定義された後にrefを更新
+  useEffect(() => {
+    onRef?.({
+      toggleAudio,
+      toggleVideo,
+      endCall
+    });
+  }, [toggleAudio, toggleVideo, endCall, onRef]);
+
   // クリーンアップ
   useEffect(() => {
     return () => {
@@ -301,10 +371,88 @@ export function CloudflareRealtimeVideo({
     };
   }, []);
 
+  // 予約情報を取得
+  const fetchAppointmentDetails = useCallback(async () => {
+    try {
+      const token = getAuthToken();
+      if (!token) {
+        console.error('No auth token available');
+        return;
+      }
+
+      const response = await fetch(`/api/appointments/${appointmentId}/details`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json() as AppointmentDetails;
+        setAppointmentDetails(data);
+      } else {
+        console.error('Failed to fetch appointment details');
+      }
+    } catch (error) {
+      console.error('Error fetching appointment details:', error);
+    }
+  }, [appointmentId]);
+
   // 初期化
   useEffect(() => {
+    fetchAppointmentDetails();
     initializeSession();
-  }, [initializeSession]);
+  }, [fetchAppointmentDetails, initializeSession]);
+
+  // リモートストリームのトラック状態を監視
+  useEffect(() => {
+    if (remoteStream) {
+      const videoTracks = remoteStream.getVideoTracks();
+      const audioTracks = remoteStream.getAudioTracks();
+
+      // ビデオトラックの状態を監視
+      videoTracks.forEach(track => {
+        const handleTrackEnded = () => {
+          setRemoteVideoEnabled(false);
+        };
+        const handleTrackEnabled = () => {
+          setRemoteVideoEnabled(track.enabled);
+        };
+
+        track.addEventListener('ended', handleTrackEnded);
+        track.addEventListener('enabled', handleTrackEnabled);
+
+        // 初期状態を設定
+        setRemoteVideoEnabled(track.enabled);
+
+        return () => {
+          track.removeEventListener('ended', handleTrackEnded);
+          track.removeEventListener('enabled', handleTrackEnabled);
+        };
+      });
+
+      // オーディオトラックの状態を監視
+      audioTracks.forEach(track => {
+        const handleTrackEnded = () => {
+          setRemoteAudioEnabled(false);
+        };
+        const handleTrackEnabled = () => {
+          setRemoteAudioEnabled(track.enabled);
+        };
+
+        track.addEventListener('ended', handleTrackEnded);
+        track.addEventListener('enabled', handleTrackEnabled);
+
+        // 初期状態を設定
+        setRemoteAudioEnabled(track.enabled);
+
+        return () => {
+          track.removeEventListener('ended', handleTrackEnded);
+          track.removeEventListener('enabled', handleTrackEnabled);
+        };
+      });
+    }
+  }, [remoteStream]);
 
   return (
     <div className="relative h-full w-full bg-gray-900">
@@ -371,6 +519,25 @@ export function CloudflareRealtimeVideo({
               <p>相手の参加を待っています...</p>
             </div>
           )}
+          {/* リモートビデオのカメラオフ時の名前表示 */}
+          {remoteStream && !remoteVideoEnabled && appointmentDetails && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+              <div className="text-center">
+                <div className="text-4xl text-white font-bold mb-2">
+                  {userType === 'patient'
+                    ? appointmentDetails.appointment.doctor?.name || '医師'
+                    : appointmentDetails.appointment.patient.name
+                  }
+                </div>
+                <div className="text-gray-300 text-lg">
+                  {userType === 'patient' ? '医師' : '患者'}
+                </div>
+                <div className="text-gray-400 text-sm mt-2">
+                  カメラオフ
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ローカルビデオ */}
@@ -385,77 +552,29 @@ export function CloudflareRealtimeVideo({
           <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-sm">
             自分 ({userType === 'patient' ? '患者' : '医師'})
           </div>
-        </div>
-      </div>
-
-      {/* コントロールバー */}
-      <div className="absolute bottom-0 left-0 right-0 bg-black/80 p-4">
-        <div className="flex justify-center items-center gap-4">
-          {/* 音声切り替えボタン */}
-          <button
-            onClick={toggleAudio}
-            className={`p-3 rounded-full transition-colors ${mediaControls.audio
-              ? 'bg-gray-700 hover:bg-gray-600 text-white'
-              : 'bg-red-500 hover:bg-red-600 text-white'
-              }`}
-            aria-label={mediaControls.audio ? 'ミュート' : 'ミュート解除'}
-          >
-            {mediaControls.audio ? (
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-              </svg>
-            ) : (
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z" />
-              </svg>
-            )}
-          </button>
-
-          {/* ビデオ切り替えボタン */}
-          <button
-            onClick={toggleVideo}
-            className={`p-3 rounded-full transition-colors ${mediaControls.video
-              ? 'bg-gray-700 hover:bg-gray-600 text-white'
-              : 'bg-red-500 hover:bg-red-600 text-white'
-              }`}
-            aria-label={mediaControls.video ? 'ビデオオフ' : 'ビデオオン'}
-          >
-            {mediaControls.video ? (
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-            ) : (
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3l18 18" />
-              </svg>
-            )}
-          </button>
-
-          {/* 通話終了ボタン */}
-          <button
-            onClick={endCall}
-            className="p-3 bg-red-600 hover:bg-red-700 text-white rounded-full transition-colors"
-            aria-label="通話終了"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z" />
-            </svg>
-          </button>
-        </div>
-
-        {/* 接続状態表示 */}
-        <div className="text-center mt-2 text-sm text-gray-400">
-          接続状態: {connectionState === 'connected' ? '接続済み' :
-            connectionState === 'connecting' ? '接続中...' :
-              connectionState === 'failed' ? '接続失敗' : '待機中'}
-          {iceConnectionState !== 'connected' && iceConnectionState !== 'completed' && (
-            <span className="ml-2">(ICE: {iceConnectionState})</span>
+          {/* カメラオフ時の患者名表示 */}
+          {!mediaControls.video && appointmentDetails && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+              <div className="text-center">
+                <div className="text-4xl text-white font-bold mb-2">
+                  {userType === 'patient'
+                    ? appointmentDetails.appointment.patient.name
+                    : appointmentDetails.appointment.doctor?.name || '医師'
+                  }
+                </div>
+                <div className="text-gray-300 text-lg">
+                  {userType === 'patient' ? '患者' : '医師'}
+                </div>
+                <div className="text-gray-400 text-sm mt-2">
+                  カメラオフ
+                </div>
+              </div>
+            </div>
           )}
         </div>
-
       </div>
+
+      {/* コントロールバーは親コンポーネントで管理 */}
     </div>
   );
 }

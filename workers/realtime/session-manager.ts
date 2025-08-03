@@ -3,18 +3,17 @@
  * 患者-医師間のセッション作成、参加、権限管理を行う
  */
 
-import type { CloudflareCallsClient, CallsSession } from './calls-client';
-import type { JWTPayload as AuthUser } from '../auth/jwt';
-import { eq, and } from 'drizzle-orm';
-import { videoSessions, appointments, sessionParticipants } from '../db/schema';
-import type {
-  VideoSession,
-  Appointment,
-  SessionParticipant,
-  NewVideoSession,
-  NewSessionParticipant
-} from '../db/types';
+import { and, eq } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
+import type { JWTPayload as AuthUser } from '../auth/jwt';
+import { appointments, sessionParticipants, videoSessions } from '../db/schema';
+import type {
+  Appointment,
+  NewSessionParticipant,
+  SessionParticipant,
+  VideoSession
+} from '../db/types';
+import type { CallsSession, CloudflareCallsClient } from './calls-client';
 
 export enum SessionStatus {
   SCHEDULED = 'scheduled',
@@ -67,12 +66,28 @@ export class SessionManager {
     // await this.checkCreatePermission(appointmentId, creatorUser);
     console.log('⚠️ 緊急モード: 権限チェックもスキップ');
 
-    // 3. 既存のアクティブセッションがないか確認
+    // 3. 既存のセッションを確認
     const existingSession = await this.getActiveSessionByAppointment(appointmentId);
     if (existingSession) {
-      // 既存セッションがある場合は参加可能として処理
+      // 既存セッションがある場合は更新
       console.log('Existing session found for appointment:', appointmentId, 'Session ID:', existingSession.id);
-      throw new Error('Session already exists. Use join endpoint instead of create.');
+
+      // セッションをWAITING状態に更新
+      await this.updateSessionStatus(existingSession.id, SessionStatus.WAITING);
+
+      // 作成者を参加者として追加（既に存在しない場合のみ）
+      const existingParticipant = await this.getParticipant(existingSession.id, creatorUser);
+      if (!existingParticipant) {
+        await this.addParticipant(existingSession.id, creatorUser);
+      }
+
+      // Cloudflare Callsセッションを作成
+      const callsSession = await this.callsClient.createSession({ sessionId: existingSession.realtimeSessionId });
+
+      return {
+        session: existingSession,
+        callsSession
+      };
     }
 
     // 4. Cloudflare Callsセッションを作成
@@ -80,20 +95,11 @@ export class SessionManager {
     const callsSession = await this.callsClient.createSession({ sessionId });
 
     // 5. データベースにセッション情報を保存
-    const videoSessionData: NewVideoSession = {
-      appointmentId: parseInt(appointmentId),
-      realtimeSessionId: sessionId,
-      status: SessionStatus.WAITING,
-      createdAt: new Date(),
-      startedAt: null,
-      endedAt: null
-    };
-
     const insertResult = await this.db.insert(videoSessions).values({
       id: crypto.randomUUID(),
-      appointmentId: videoSessionData.appointmentId,
-      realtimeSessionId: videoSessionData.realtimeSessionId,
-      status: videoSessionData.status
+      appointmentId: parseInt(appointmentId),
+      realtimeSessionId: sessionId,
+      status: SessionStatus.WAITING
     }).returning();
 
     const createdSession = insertResult[0];
@@ -256,7 +262,7 @@ export class SessionManager {
     // 医師: 担当予約またはサポート参加
     if (user.userType === 'worker' && user.role === 'doctor') {
       const canJoin = appointment.workerId === user.id ||
-                     await this.isSupportDoctor(user.id, appointment.id.toString());
+        await this.isSupportDoctor(user.id, appointment.id.toString());
       if (!canJoin) {
         throw new Error('Permission denied: Not authorized for this appointment');
       }

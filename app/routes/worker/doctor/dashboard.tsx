@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { useAuth } from '~/contexts/AuthContext';
-import { Loading } from '~/components/common/Loading';
 import { ErrorMessage } from '~/components/common/ErrorMessage';
+import { Loading } from '~/components/common/Loading';
+import { useAuth } from '~/contexts/AuthContext';
 
 export function meta() {
   return [
@@ -86,17 +86,30 @@ export default function DoctorDashboard() {
 
         if (appointmentsResponse.ok) {
           const data = await appointmentsResponse.json() as { appointments: Appointment[] };
+          console.log('📅 取得した予約データ:', data.appointments);
+          console.log('📅 今日の日付:', today);
+
           // 今日の予約のみフィルタリング
-          const todayAppointments = data.appointments.filter(apt =>
-            apt.scheduledAt.startsWith(today)
-          );
+          const todayAppointments = data.appointments.filter(apt => {
+            const appointmentDate = new Date(apt.scheduledAt).toISOString().split('T')[0];
+            console.log('📅 予約日:', appointmentDate, '今日:', today, '一致:', appointmentDate === today);
+            return appointmentDate === today;
+          });
+
+          console.log('📅 今日の予約:', todayAppointments);
           setAppointments(todayAppointments);
+
           // 次の予約を取得
           const now = new Date();
           const futureAppointments = todayAppointments.filter(apt =>
             new Date(apt.scheduledAt) > now
           );
+          console.log('📅 今後の予約:', futureAppointments);
           setNextAppointment(futureAppointments.length > 0 ? futureAppointments[0] : null);
+        } else {
+          console.error('❌ 予約取得エラー:', appointmentsResponse.status);
+          const errorData = await appointmentsResponse.json();
+          console.error('❌ エラー詳細:', errorData);
         }
 
         // 統計情報を取得
@@ -141,6 +154,7 @@ export default function DoctorDashboard() {
     return new Date(dateString).toLocaleTimeString('ja-JP', {
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: 'Asia/Tokyo',
     });
   };
 
@@ -173,30 +187,29 @@ export default function DoctorDashboard() {
           />
         )}
 
-        {/* 次の予約カード */}
-        {nextAppointment && (
-          <div className="mb-6 bg-blue-50 border-2 border-blue-200 rounded-lg p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-blue-900">
-                  次の診察予定
-                </h2>
-                <p className="mt-1 text-blue-700">
-                  {formatTime(nextAppointment.scheduledAt)} - {nextAppointment.patient.name}様
-                </p>
-                <p className="text-sm text-blue-600 mt-1">
-                  主訴: {nextAppointment.chiefComplaint || '未記入'}
-                </p>
-              </div>
-              <Link
-                to={`/worker/doctor/consultation/${nextAppointment.id}`}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-lg transition-colors"
-              >
-                診察を開始
-              </Link>
+        {/* 診察室選択カード */}
+        <div className="mb-6 bg-green-50 border-2 border-green-200 rounded-lg p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-green-900">
+                診察室選択
+              </h2>
+              <p className="mt-1 text-green-700">
+                下記の予約一覧から診察を開始する患者を選択してください
+              </p>
+              <p className="text-sm text-green-600 mt-1">
+                待機中・割当済みの予約が診察可能です
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-sm text-green-600">
+                選択可能な予約: {activeAppointments.filter(apt =>
+                  ['waiting', 'assigned'].includes(apt.status)
+                ).length}件
+              </p>
             </div>
           </div>
-        )}
+        </div>
 
         {/* 統計サマリー */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -271,58 +284,78 @@ export default function DoctorDashboard() {
             <div className="bg-white shadow rounded-lg">
               <div className="px-6 py-4 border-b border-gray-200">
                 <h2 className="text-lg font-semibold text-gray-900">本日の診察予定</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  診察可能な予約を選択して診察室に入室してください
+                </p>
               </div>
               <div className="divide-y divide-gray-200">
                 {activeAppointments.length > 0 ? (
-                  activeAppointments.map((appointment) => (
-                    <div key={appointment.id} className="p-6 hover:bg-gray-50 transition-colors">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center">
-                            <p className="text-sm font-medium text-gray-900">
-                              {formatTime(appointment.scheduledAt)}
+                  activeAppointments.map((appointment) => {
+                    const isConsultationAvailable = appointment.status === 'waiting' || appointment.status === 'assigned';
+                    return (
+                      <div
+                        key={appointment.id}
+                        className={`p-6 transition-colors ${isConsultationAvailable
+                          ? 'hover:bg-green-50 border-l-4 border-green-500'
+                          : 'hover:bg-gray-50'
+                          }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center">
+                              <p className="text-sm font-medium text-gray-900">
+                                {formatTime(appointment.scheduledAt)}
+                              </p>
+                              <span className="ml-3">{getStatusBadge(appointment.status)}</span>
+                              {isConsultationAvailable && (
+                                <span className="ml-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+                                  診察可能
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-1 text-sm text-gray-900 font-medium">
+                              {appointment.patient.name}様
                             </p>
-                            <span className="ml-3">{getStatusBadge(appointment.status)}</span>
+                            <p className="text-sm text-gray-600">
+                              主訴: {appointment.chiefComplaint || '未記入'}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {appointment.appointmentType === 'initial' ? '初診' :
+                                appointment.appointmentType === 'follow_up' ? '再診' : '緊急'}
+                              ・{appointment.durationMinutes}分
+                            </p>
                           </div>
-                          <p className="mt-1 text-sm text-gray-900 font-medium">
-                            {appointment.patient.name}様
-                          </p>
-                          <p className="text-sm text-gray-600">
-                            主訴: {appointment.chiefComplaint || '未記入'}
-                          </p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {appointment.appointmentType === 'initial' ? '初診' :
-                             appointment.appointmentType === 'follow_up' ? '再診' : '緊急'}
-                            ・{appointment.durationMinutes}分
-                          </p>
-                        </div>
-                        <div className="ml-4 flex flex-col space-y-2">
-                          {appointment.status === 'waiting' || appointment.status === 'assigned' ? (
-                            <Link
-                              to={`/worker/doctor/consultation/${appointment.id}`}
-                              className="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md text-sm transition-colors"
-                            >
-                              診察開始
-                            </Link>
-                          ) : appointment.status === 'completed' ? (
-                            <Link
-                              to={`/worker/doctor/medical-records/${appointment.id}/edit`}
-                              className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md text-sm transition-colors"
-                            >
-                              カルテ入力
-                            </Link>
-                          ) : (
-                            <Link
-                              to={`/patient/${appointment.patient.id}`}
-                              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                            >
-                              患者情報
-                            </Link>
-                          )}
+                          <div className="ml-4 flex flex-col space-y-2">
+                            {isConsultationAvailable ? (
+                              <Link
+                                to={`/worker/doctor/consultation/${appointment.id}`}
+                                className="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md text-sm transition-colors flex items-center"
+                              >
+                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                                診察開始
+                              </Link>
+                            ) : appointment.status === 'completed' ? (
+                              <Link
+                                to={`/worker/doctor/medical-records/${appointment.id}/edit`}
+                                className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md text-sm transition-colors"
+                              >
+                                カルテ入力
+                              </Link>
+                            ) : (
+                              <Link
+                                to={`/patient/${appointment.patient.id}`}
+                                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                              >
+                                患者情報
+                              </Link>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <div className="p-12 text-center">
                     <svg
@@ -335,10 +368,13 @@ export default function DoctorDashboard() {
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         strokeWidth={2}
-                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                        d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
                       />
                     </svg>
-                    <p className="mt-2 text-gray-500">本日の予約はすべて完了しました</p>
+                    <p className="mt-2 text-gray-500">本日の診察可能な予約がありません</p>
+                    <p className="text-sm text-gray-400 mt-1">
+                      新しい予約が入るまでお待ちください
+                    </p>
                   </div>
                 )}
               </div>
@@ -370,6 +406,15 @@ export default function DoctorDashboard() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                   </svg>
                   患者一覧
+                </Link>
+                <Link
+                  to="/worker/doctor/medical-records"
+                  className="w-full bg-green-100 hover:bg-green-200 text-green-800 font-medium py-3 px-4 rounded-md flex items-center justify-center transition-colors"
+                >
+                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  カルテ閲覧
                 </Link>
               </div>
             </div>
