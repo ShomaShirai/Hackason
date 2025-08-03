@@ -155,7 +155,7 @@ export function SpeechRecognition({
                     // 高感度モード: 複数の候補を組み合わせて最適な結果を生成
                     let bestTranscript = '';
                     let bestConfidence = 0;
-                    let allAlternatives: string[] = [];
+                    const allAlternatives: string[] = [];
 
                     for (let j = 0; j < result.length; j++) {
                         const alternative = result[j];

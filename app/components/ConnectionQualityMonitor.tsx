@@ -23,7 +23,7 @@ export function ConnectionQualityMonitor({ metrics, className = '' }: Connection
   const [showDetails, setShowDetails] = useState(false);
 
   useEffect(() => {
-    if (!metrics) return;
+    if (!metrics) {return;}
 
     // 品質レベルの判定
     const { packetLossRate, rtt, jitter } = metrics;
@@ -39,7 +39,7 @@ export function ConnectionQualityMonitor({ metrics, className = '' }: Connection
     }
   }, [metrics]);
 
-  if (!metrics) return null;
+  if (!metrics) {return null;}
 
   const getQualityColor = (level: string) => {
     switch (level) {

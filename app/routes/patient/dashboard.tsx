@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { useAuth } from '~/contexts/AuthContext';
-import { Loading } from '~/components/common/Loading';
 import { ErrorMessage } from '~/components/common/ErrorMessage';
+import { Loading } from '~/components/common/Loading';
 import { Modal } from '~/components/common/Modal';
+import { useAuth } from '~/contexts/AuthContext';
 import { getAuthToken } from '../../utils/auth';
 
 export function meta() {
@@ -254,9 +254,8 @@ export default function PatientDashboard() {
               {notifications.slice(0, 3).map(notification => (
                 <div
                   key={notification.id}
-                  className={`mb-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                    notification.isRead ? 'bg-gray-50 hover:bg-gray-100' : 'bg-blue-50 hover:bg-blue-100'
-                  }`}
+                  className={`mb-3 p-3 rounded-lg cursor-pointer transition-colors ${notification.isRead ? 'bg-gray-50 hover:bg-gray-100' : 'bg-blue-50 hover:bg-blue-100'
+                    }`}
                   onClick={() => handleNotificationClick(notification)}
                 >
                   <p className="font-medium text-sm text-gray-900">{notification.title}</p>
@@ -317,6 +316,14 @@ export default function PatientDashboard() {
                           </p>
                         </div>
                         <div className="ml-4 flex flex-col space-y-2">
+                          {appointment.status === 'waiting' && (
+                            <Link
+                              to={`/patient/consultation/${appointment.id}`}
+                              className="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 transition-colors"
+                            >
+                              診察室に入室
+                            </Link>
+                          )}
                           {appointment.status === 'scheduled' && (
                             <Link
                               to={`/patient/appointments/${appointment.id}/questionnaire`}
@@ -414,9 +421,8 @@ export default function PatientDashboard() {
           {notifications.map(notification => (
             <div
               key={notification.id}
-              className={`mb-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                notification.isRead ? 'bg-gray-50 hover:bg-gray-100' : 'bg-blue-50 hover:bg-blue-100'
-              }`}
+              className={`mb-3 p-3 rounded-lg cursor-pointer transition-colors ${notification.isRead ? 'bg-gray-50 hover:bg-gray-100' : 'bg-blue-50 hover:bg-blue-100'
+                }`}
               onClick={() => handleNotificationClick(notification)}
             >
               <p className="font-medium text-sm text-gray-900">{notification.title}</p>

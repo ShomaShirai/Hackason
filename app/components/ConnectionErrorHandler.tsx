@@ -22,7 +22,7 @@ export function ConnectionErrorHandler({
 }: ConnectionErrorHandlerProps) {
     const [showDetails, setShowDetails] = useState(false);
 
-    if (!error) return null;
+    if (!error) {return null;}
 
     const getErrorIcon = (type: string) => {
         switch (type) {

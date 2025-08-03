@@ -955,8 +955,13 @@ api.post('/patient/appointments', authMiddleware(), async (c) => {
     }
 
     // 重複チェック
-    const scheduledAt = new Date(`${appointmentDate} ${startTime}`);
-    const endAt = new Date(`${appointmentDate} ${endTime}`);
+    // JST時刻をUTCに変換（JST = UTC+9）
+    const jstScheduledAt = new Date(`${appointmentDate}T${startTime}:00+09:00`);
+    const jstEndAt = new Date(`${appointmentDate}T${endTime}:00+09:00`);
+
+    // UTCに変換
+    const scheduledAt = new Date(jstScheduledAt.getTime() - 9 * 60 * 60 * 1000);
+    const endAt = new Date(jstEndAt.getTime() - 9 * 60 * 60 * 1000);
 
     const existingAppointments = await db
       .select()
@@ -1407,16 +1412,12 @@ api.post('/worker/medical-records', authMiddleware(), async (c) => {
       attachmentIds: _attachmentIds,
     } = body;
 
-    // 既存のレコードがないか確認
+    // 既存のレコードを確認
     const existing = await db
       .select()
       .from(medicalRecords)
       .where(eq(medicalRecords.appointmentId, appointmentId))
       .get();
-
-    if (existing) {
-      return c.json({ error: 'Medical record already exists for this appointment' }, 400);
-    }
 
     // 処方箋データのバリデーション
     if (prescriptions && Array.isArray(prescriptions)) {
@@ -1427,29 +1428,50 @@ api.post('/worker/medical-records', authMiddleware(), async (c) => {
       }
     }
 
-    // 新規作成
-    const result = await db
-      .insert(medicalRecords)
-      .values({
-        appointmentId,
-        subjective: subjective || null,
-        objective: objective || null,
-        assessment: assessment || null,
-        plan: plan || null,
-        transcript: transcript || null,
-        vitalSigns: vitalSigns ? JSON.stringify(vitalSigns) : '{}',
-        prescriptions: prescriptions ? JSON.stringify(prescriptions) : '[]',
-        aiSummary: aiSummary ? JSON.stringify(aiSummary) : '{}',
-      })
-      .returning();
+    let result;
+
+    if (existing) {
+      // 既存のレコードを更新
+      result = await db
+        .update(medicalRecords)
+        .set({
+          subjective: subjective || existing.subjective,
+          objective: objective || existing.objective,
+          assessment: assessment || existing.assessment,
+          plan: plan || existing.plan,
+          transcript: transcript || existing.transcript,
+          vitalSigns: vitalSigns ? JSON.stringify(vitalSigns) : existing.vitalSigns,
+          prescriptions: prescriptions ? JSON.stringify(prescriptions) : existing.prescriptions,
+          aiSummary: aiSummary ? JSON.stringify(aiSummary) : existing.aiSummary,
+          updatedAt: new Date(),
+        })
+        .where(eq(medicalRecords.id, existing.id))
+        .returning();
+    } else {
+      // 新規作成
+      result = await db
+        .insert(medicalRecords)
+        .values({
+          appointmentId,
+          subjective: subjective || null,
+          objective: objective || null,
+          assessment: assessment || null,
+          plan: plan || null,
+          transcript: transcript || null,
+          vitalSigns: vitalSigns ? JSON.stringify(vitalSigns) : '{}',
+          prescriptions: prescriptions ? JSON.stringify(prescriptions) : '[]',
+          aiSummary: aiSummary ? JSON.stringify(aiSummary) : '{}',
+        })
+        .returning();
+    }
 
     return c.json({
       success: true,
       record: result[0],
-    }, 201);
+    }, existing ? 200 : 201);
   } catch (error) {
-    console.error('Error creating medical record:', error);
-    return c.json({ error: 'Failed to create medical record' }, 500);
+    console.error('Error creating/updating medical record:', error);
+    return c.json({ error: 'Failed to create/update medical record' }, 500);
   }
 });
 
@@ -2261,6 +2283,60 @@ api.route('/worker/operator/appointments', operatorAppointmentHandlers);
 api.route('/worker/appointments', operatorAppointmentHandlers);
 api.route('/chat', chatHandlers);
 
+// 医師向けカルテ一覧取得
+api.get('/worker/doctor/medical-records', authMiddleware(), async (c) => {
+  try {
+    const user = c.get('user');
+    if (user.userType !== 'worker' || user.role !== 'doctor') {
+      return c.json({ error: 'Forbidden' }, 403);
+    }
+
+    const db = initializeDatabase(c.env);
+    if (!db) {
+      return c.json({ error: 'Database not available' }, 500);
+    }
+
+    // 医師が担当した予約のカルテを取得
+    const records = await db
+      .select()
+      .from(medicalRecords)
+      .innerJoin(appointments, eq(medicalRecords.appointmentId, appointments.id))
+      .innerJoin(patients, eq(appointments.patientId, patients.id))
+      .where(eq(appointments.assignedWorkerId, user.id))
+      .orderBy(desc(medicalRecords.updatedAt))
+      .all();
+
+    return c.json({
+      records: records.map(record => ({
+        id: record.medical_records.id,
+        appointmentId: record.medical_records.appointmentId,
+        subjective: record.medical_records.subjective,
+        objective: record.medical_records.objective,
+        assessment: record.medical_records.assessment,
+        plan: record.medical_records.plan,
+        transcript: record.medical_records.transcript,
+        vitalSigns: record.medical_records.vitalSigns ? JSON.parse(record.medical_records.vitalSigns as string) : {},
+        prescriptions: record.medical_records.prescriptions ? JSON.parse(record.medical_records.prescriptions as string) : [],
+        createdAt: record.medical_records.createdAt,
+        updatedAt: record.medical_records.updatedAt,
+        appointment: {
+          id: record.appointments.id,
+          scheduledAt: record.appointments.scheduledAt,
+          status: record.appointments.status,
+          patient: {
+            id: record.patients.id,
+            name: record.patients.name,
+            email: record.patients.email,
+          },
+        },
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching medical records:', error);
+    return c.json({ error: 'Failed to fetch medical records' }, 500);
+  }
+});
+
 // APIルートをマウント（React Routerより前に定義して優先度を上げる）
 app.route('/api', api);
 // videoSessionsAppを追加で有効化（新しいrealtime/createエンドポイント用）
@@ -2268,7 +2344,6 @@ app.route('/api/video-sessions', videoSessionsApp);
 app.route('/api/websocket-signaling', webSocketSignalingApp);
 app.route('/api/ws', wsSimpleApp); // シンプルなWebSocket実装
 app.route('/api', turnApi); // Cloudflare TURN認証情報
-
 
 // React Router統合（フロントエンド）- APIパス以外のすべて
 app.all('*', async (c) => {
