@@ -52,6 +52,8 @@ export interface Env {
   TURN_SERVICE_ID?: string;
   TURN_SERVICE_TOKEN?: string;
   SIGNALING_ROOM: DurableObjectNamespace;
+  DIFY_BASE_URL: string;
+  DIFY_API_KEY: string;
 }
 
 // Hono型定義の拡張

@@ -6,6 +6,54 @@ import { RequireAuth } from "~/components/auth/RequireAuth"
 import { ErrorMessage } from "~/components/common/ErrorMessage"
 import { getAuthToken } from "../../../utils/auth"
 
+// Web Speech API の型定義
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  start(): void
+  stop(): void
+  abort(): void
+  onresult: ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => any) | null
+  onerror: ((this: SpeechRecognition, ev: SpeechRecognitionErrorEvent) => any) | null
+  onend: ((this: SpeechRecognition, ev: Event) => any) | null
+}
+
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number
+  results: SpeechRecognitionResultList
+}
+
+interface SpeechRecognitionResultList {
+  length: number
+  item(index: number): SpeechRecognitionResult
+  [index: number]: SpeechRecognitionResult
+}
+
+interface SpeechRecognitionResult {
+  isFinal: boolean
+  length: number
+  item(index: number): SpeechRecognitionAlternative
+  [index: number]: SpeechRecognitionAlternative
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string
+  confidence: number
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string
+  message: string
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition: new () => SpeechRecognition
+    webkitSpeechRecognition: new () => SpeechRecognition
+  }
+}
+
 interface TimeSlot {
   startTime: string
   endTime: string
@@ -97,12 +145,25 @@ export default function NewAppointment() {
   const [selectedDoctor, setSelectedDoctor] = useState<number | null>(null)
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null)
   const [chiefComplaint, setChiefComplaint] = useState("")
+  const [chatMessages, setChatMessages] = useState<{id: string, text: string, isUser: boolean, timestamp: Date}[]>([])
+  const [currentInput, setCurrentInput] = useState("")
+  const [questionnaireData, setQuestionnaireData] = useState<string | null>(null)
+  const [showQuestionnaire, setShowQuestionnaire] = useState(false)
   const [appointmentType, setAppointmentType] = useState<"initial" | "followup">("initial")
 
   // クライアントサイドでのスロット取得
   const [slots, setSlots] = useState<DoctorSlot[]>([])
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
   const [slotsError, setSlotsError] = useState<string | null>(null)
+  
+  // 外部API関連の状態
+  const [isExternalAPILoading, setIsExternalAPILoading] = useState(false)
+  const [externalAPIError, setExternalAPIError] = useState<string | null>(null)
+
+  // 音声認識関連の状態
+  const [isListening, setIsListening] = useState(false)
+  const [speechRecognition, setSpeechRecognition] = useState<SpeechRecognition | null>(null)
+  const [speechError, setSpeechError] = useState<string | null>(null)
 
   const isSubmitting = navigation.state === "submitting"
 
@@ -221,7 +282,212 @@ export default function NewAppointment() {
     }
   }
 
+  // メッセージ送信機能
+  const handleSendMessage = async () => {
+    if (!currentInput.trim()) return
+
+    const userMessage = {
+      id: Date.now().toString(),
+      text: currentInput.trim(),
+      isUser: true,
+      timestamp: new Date()
+    }
+
+    // ユーザーメッセージをチャットに追加
+    const newChatMessages = [...chatMessages, userMessage]
+    setChatMessages(newChatMessages)
+    
+    // 主訴フィールドも更新（フォーム送信用）
+    setChiefComplaint(newChatMessages.map(msg => `${msg.isUser ? '患者' : 'AI'}: ${msg.text}`).join('\n'))
+    
+    const messageToSend = currentInput.trim()
+    setCurrentInput('')
+    
+    // DIFY APIに送信
+    await handleDIFYAPICall(messageToSend, newChatMessages)
+  }
+
+  // マークダウン判定関数
+  const isMarkdownQuestionnaire = (text: string): boolean => {
+    // マークダウンの特徴的なパターンをチェック
+    const markdownPatterns = [
+      /^#{1,6}\s+/m,        // ヘッダー
+      /\*\*[^*]+\*\*/,      // 太字
+      /\*[^*]+\*/,          // 斜体
+      /^\s*[-*+]\s+/m,      // リスト
+      /^\s*\d+\.\s+/m,     // 番号付きリスト
+      /^\s*\|.+\|\s*$/m,   // テーブル
+      /```[\s\S]*?```/,    // コードブロック
+    ]
+    
+    // 問診関連のキーワードもチェック
+    const questionnaireKeywords = [
+      '問診表',
+      '問診結果',
+      '診断情報',
+      '症状まとめ',
+      '受診内容'
+    ]
+    
+    const hasMarkdownPatterns = markdownPatterns.some(pattern => pattern.test(text))
+    const hasQuestionnaireKeywords = questionnaireKeywords.some(keyword => text.includes(keyword))
+    
+    return hasMarkdownPatterns && hasQuestionnaireKeywords
+  }
+
+  // DIFY API呼び出し関数
+  const handleDIFYAPICall = async (message: string, currentChatMessages: typeof chatMessages) => {
+    setIsExternalAPILoading(true)
+    setExternalAPIError(null)
+
+    try {
+      // DIFY API呼び出し
+      const response = await fetch('/api/external/symptom-analysis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getAuthToken('/patient')}`,
+        },
+        body: JSON.stringify({
+          message: message,
+          chatHistory: currentChatMessages,
+          patientContext: {
+            appointmentType,
+            selectedSpecialty
+          }
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('AI分析に失敗しました')
+      }
+
+      const result = await response.json() as {
+        comment: string
+      }
+      
+      // マークダウン形式の問診表かチェック
+      if (isMarkdownQuestionnaire(result.comment)) {
+        // マークダウンの場合は問診表データのみ保存し、チャットには表示しない
+        setQuestionnaireData(result.comment)
+        // 主訴フィールドは現在のチャット履歴のみで更新
+        setChiefComplaint(currentChatMessages.map(msg => `${msg.isUser ? '患者' : 'AI'}: ${msg.text}`).join('\n'))
+      } else {
+        // 通常のメッセージの場合はチャットに追加
+        const aiMessage = {
+          id: (Date.now() + 1).toString(),
+          text: result.comment,
+          isUser: false,
+          timestamp: new Date()
+        }
+        
+        const updatedMessages = [...currentChatMessages, aiMessage]
+        setChatMessages(updatedMessages)
+        
+        // 主訴フィールドも更新
+        setChiefComplaint(updatedMessages.map(msg => `${msg.isUser ? '患者' : 'AI'}: ${msg.text}`).join('\n'))
+      }
+      
+    } catch (error) {
+      console.error('DIFY API error:', error)
+      setExternalAPIError(error instanceof Error ? error.message : 'AI分析中にエラーが発生しました')
+      
+      // エラーメッセージもチャットに追加
+      const errorMessage = {
+        id: (Date.now() + 1).toString(),
+        text: 'すみません、現在AIが応答できません。後ほど再試行してください。',
+        isUser: false,
+        timestamp: new Date()
+      }
+      const updatedMessages = [...currentChatMessages, errorMessage]
+      setChatMessages(updatedMessages)
+      setChiefComplaint(updatedMessages.map(msg => `${msg.isUser ? '患者' : 'AI'}: ${msg.text}`).join('\n'))
+    } finally {
+      setIsExternalAPILoading(false)
+    }
+  }
+
+
   const canSubmit = selectedDoctor && selectedSlot && chiefComplaint.trim()
+
+  // 音声認識の初期化
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition()
+        recognition.continuous = true
+        recognition.interimResults = true
+        recognition.lang = 'ja-JP'
+        
+
+        
+        recognition.onerror = (event) => {
+          console.error('Speech recognition error:', event.error)
+          setSpeechError(`音声認識エラー: ${event.error}`)
+          setIsListening(false)
+        }
+        
+        recognition.onend = () => {
+          setIsListening(false)
+        }
+        
+        // 音声認識の自動停止（5秒間音声がない場合）
+        let silenceTimer: NodeJS.Timeout
+        recognition.onresult = (event) => {
+          // 既存のonresult処理をここに移動
+          let finalTranscript = ''
+          let interimTranscript = ''
+          
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript
+            } else {
+              interimTranscript += transcript
+            }
+          }
+          
+          if (finalTranscript) {
+            // チャット入力フィールドに追加
+            setCurrentInput(prev => {
+              const currentText = prev.trim()
+              return currentText ? `${currentText} ${finalTranscript}` : finalTranscript
+            })
+          }
+          
+          // 音声が検出されたらタイマーをリセット
+          clearTimeout(silenceTimer)
+          silenceTimer = setTimeout(() => {
+            if (isListening) {
+              stopListening()
+            }
+          }, 5000) // 5秒間音声がない場合に自動停止
+        }
+        
+        setSpeechRecognition(recognition)
+      } else {
+        setSpeechError('お使いのブラウザは音声認識をサポートしていません')
+      }
+    }
+  }, [])
+
+  // 音声認識開始
+  const startListening = () => {
+    if (speechRecognition) {
+      setSpeechError(null)
+      setIsListening(true)
+      speechRecognition.start()
+    }
+  }
+
+  // 音声認識停止
+  const stopListening = () => {
+    if (speechRecognition) {
+      speechRecognition.stop()
+      setIsListening(false)
+    }
+  }
 
   return (
     <RequireAuth>
@@ -363,19 +629,168 @@ export default function NewAppointment() {
                 </div>
 
                 <div>
-                  <label htmlFor="chiefComplaint" className="block text-sm font-medium text-gray-700 mb-1">
-                    主訴（症状をお聞かせください）
-                  </label>
-                  <textarea
-                    id="chiefComplaint"
-                    name="chiefComplaint"
-                    value={chiefComplaint}
-                    onChange={(e) => setChiefComplaint(e.target.value)}
-                    rows={4}
-                    required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="例：3日前から発熱と頭痛があります"
-                  />
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700">
+                      主訴（チャット形式で症状をお聞かせください）
+                    </label>
+                  </div>
+                  
+                  {/* 音声認識エラー表示 */}
+                  {speechError && (
+                    <div className="mb-2 p-2 bg-red-50 border border-red-200 rounded-md">
+                      <p className="text-sm text-red-700">{speechError}</p>
+                    </div>
+                  )}
+                  
+                  {/* チャット形式の入力 */}
+                  <div className="border border-gray-300 rounded-lg">
+                    {/* チャットメッセージ表示エリア */}
+                    <div className="h-64 overflow-y-auto p-4 bg-gray-50">
+                      {chatMessages.length === 0 ? (
+                        <div className="text-center text-gray-500 mt-8">
+                          <p>問診を開始します。症状についてお話しください。</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {chatMessages.map((message) => (
+                            <div
+                              key={message.id}
+                              className={`flex ${
+                                message.isUser ? "justify-end" : "justify-start"
+                              }`}
+                            >
+                              <div
+                                className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                                  message.isUser
+                                    ? "bg-blue-500 text-white"
+                                    : "bg-white border border-gray-200 text-gray-800"
+                                }`}
+                              >
+                                <p className="text-sm">{message.text}</p>
+                                <p className={`text-xs mt-1 ${
+                                  message.isUser ? "text-blue-100" : "text-gray-500"
+                                }`}>
+                                  {message.timestamp.toLocaleTimeString('ja-JP', { 
+                                    hour: '2-digit', 
+                                    minute: '2-digit' 
+                                  })}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* AI応答中のローディング表示 */}
+                      {isExternalAPILoading && (
+                        <div className="flex justify-start">
+                          <div className="bg-white border border-gray-200 px-4 py-2 rounded-lg">
+                            <div className="flex items-center space-x-2">
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                              <span className="text-sm text-gray-600">AIが応答を作成中...</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* 問診表ボタン */}
+                    {questionnaireData && (
+                      <div className="px-4 py-2 border-t border-gray-300 bg-gray-50">
+                        <button
+                          type="button"
+                          onClick={() => setShowQuestionnaire(true)}
+                          className="w-full bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 transition-colors flex items-center justify-center gap-2"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          問診表を確認
+                        </button>
+                      </div>
+                    )}
+                    
+                    {/* メッセージ入力エリア */}
+                    <div className="border-t border-gray-300 p-4">
+                      <div className="flex gap-2">
+                        <div className="flex-1 relative">
+                          <input
+                            type="text"
+                            value={currentInput}
+                            onChange={(e) => setCurrentInput(e.target.value)}
+                            onKeyPress={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault()
+                                handleSendMessage()
+                              }
+                            }}
+                            placeholder="症状や気になることを入力してください..."
+                            className="w-full px-3 py-2 pr-12 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            disabled={isExternalAPILoading}
+                          />
+                          
+                          {/* 音声認識ボタン（チャット内） */}
+                          <div className="absolute right-2 top-2">
+                            {isListening ? (
+                              <button
+                                type="button"
+                                onClick={stopListening}
+                                className="p-1 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
+                                title="音声認識を停止"
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                                </svg>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={startListening}
+                                disabled={!speechRecognition || isExternalAPILoading}
+                                className="p-1 bg-blue-500 text-white rounded-full hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                                title="音声認識を開始"
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <button
+                          type="button"
+                          onClick={handleSendMessage}
+                          disabled={!currentInput.trim() || isExternalAPILoading}
+                          className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                          </svg>
+                          送信
+                        </button>
+                      </div>
+                      
+                      {/* 音声認識中のインジケーター */}
+                      {isListening && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <div className="flex space-x-1">
+                            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0.1s' }}></div>
+                            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                          </div>
+                          <span className="text-sm text-red-600">音声認識中...</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* チャットモード用のエラーメッセージ */}
+                  {externalAPIError && (
+                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md">
+                      <p className="text-sm text-red-700">{externalAPIError}</p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="bg-gray-50 p-4 rounded-md">
@@ -419,7 +834,90 @@ export default function NewAppointment() {
             </form>
           </div>
         )}
+        
+        {/* 問診表モーダル */}
+        {showQuestionnaire && questionnaireData && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden">
+              {/* モーダルヘッダー */}
+              <div className="flex justify-between items-center p-6 border-b border-gray-200">
+                <h2 className="text-xl font-semibold text-gray-900">問診表</h2>
+                <button
+                  onClick={() => setShowQuestionnaire(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              {/* モーダルコンテンツ */}
+              <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+                <div className="prose max-w-none">
+                  <MarkdownRenderer content={questionnaireData} />
+                </div>
+              </div>
+              
+              {/* モーダルフッター */}
+              <div className="flex justify-end gap-3 p-6 border-t border-gray-200">
+                <button
+                  onClick={() => navigator.clipboard?.writeText(questionnaireData)}
+                  className="bg-gray-500 text-white px-4 py-2 rounded-md hover:bg-gray-600 transition-colors flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                  </svg>
+                  コピー
+                </button>
+                <button
+                  onClick={() => setShowQuestionnaire(false)}
+                  className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 transition-colors"
+                >
+                  閉じる
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </RequireAuth>
+  )
+}
+
+// 簡易マークダウンレンダラーコンポーネント
+function MarkdownRenderer({ content }: { content: string }) {
+  // 基本的なマークダウン記法をHTMLに変換
+  const renderMarkdown = (text: string) => {
+    let html = text
+    
+    // ヘッダー (# ## ### など)
+    html = html.replace(/^### (.*$)/gim, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>')
+    html = html.replace(/^## (.*$)/gim, '<h2 class="text-xl font-semibold mt-6 mb-3">$1</h2>')
+    html = html.replace(/^# (.*$)/gim, '<h1 class="text-2xl font-bold mt-8 mb-4">$1</h1>')
+    
+    // 太字 **text**
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>')
+    
+    // 斜体 *text*
+    html = html.replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
+    
+    // リスト項目 - または *
+    html = html.replace(/^[\s]*[-*+]\s+(.*$)/gim, '<li class="ml-4 mb-1">• $1</li>')
+    
+    // 番号付きリスト 1.
+    html = html.replace(/^[\s]*(\d+)\.\s+(.*$)/gim, '<li class="ml-4 mb-1">$1. $2</li>')
+    
+    // 改行を<br>に変換
+    html = html.replace(/\n/g, '<br>')
+    
+    return html
+  }
+
+  return (
+    <div 
+      className="text-gray-800 leading-relaxed"
+      dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+    />
   )
 }

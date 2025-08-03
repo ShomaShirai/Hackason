@@ -3,7 +3,7 @@
  * https://developers.cloudflare.com/workers/wrangler/configuration/
  */ {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "takoyaki",
+  "name": "fd-qiita-hackathon-2025",
   "compatibility_date": "2024-09-23",
   "compatibility_flags": [
     "nodejs_compat"
@@ -15,7 +15,9 @@
     "JWT_ACCESS_TOKEN_EXPIRY": "3600",
     "JWT_REFRESH_TOKEN_EXPIRY": "604800",
     "CF_CALLS_APP_ID": "cc76d619d54422a6cf5c32c26f9ec4ca",
-    "CF_CALLS_APP_SECRET": "344dc3edf44b8a5fa98a42eb7df61448ae86d720712ffaeea42251367bb6efc6"
+    "CF_CALLS_APP_SECRET": "344dc3edf44b8a5fa98a42eb7df61448ae86d720712ffaeea42251367bb6efc6",
+    "DIFY_BASE_URL": "https://api.dify.ai/v1",
+    "DIFY_API_KEY": "app-gGCDur7gD5ATJRCgIzH1lFFZ"
   },
   "observability": {
     "enabled": true
@@ -34,8 +36,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "takoyaki-db",
-      "database_id": "186729c3-c2ad-4079-bbca-6d9b3ad70c30",
+      "database_name": "medical-consultation-db",
+      "database_id": "bc27a088-a901-4d07-8d6f-894dfa03cef4",
       "migrations_dir": "./drizzle"
     }
   ],
