@@ -1,6 +1,6 @@
 import { createClient } from '@libsql/client';
 import * as dotenv from 'dotenv';
-import { and, eq, or } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle as drizzleD1 } from 'drizzle-orm/d1';
 import { drizzle as drizzleLibSQL } from 'drizzle-orm/libsql';
 import { Hono } from 'hono';
@@ -380,7 +380,7 @@ api.get('/patient/profile', authMiddleware(), async (c) => {
 });
 
 // 予約作成 - 重複チェックを緩和
-// 予約作成エンドポイントを修正（450行目付近）
+// 450行目付近の予約作成エンドポイントを完全修正
 api.post('/patient/appointments', authMiddleware(), async (c) => {
   try {
     const user = c.get('user');
@@ -397,22 +397,33 @@ api.post('/patient/appointments', authMiddleware(), async (c) => {
       appointmentType,
       chiefComplaint,
       hasImage,
-      tongueAnalysis, // ✅ 舌診結果を受け取る
-      imageData // ✅ 画像データも受け取る（オプション）
+      tongueAnalysis,
+      imageData
     } = body;
 
     console.log('📋 予約作成リクエスト:', {
       doctorId,
       appointmentDate,
+      startTime,
+      endTime, // ✅ 正しい終了時刻をログ出力
       appointmentType,
       chiefComplaint: chiefComplaint?.substring(0, 50) + '...',
       hasImage,
-      hasTongueAnalysis: !!tongueAnalysis,
-      tongueAnalysisConfidence: tongueAnalysis?.confidence_score
+      hasTongueAnalysis: !!tongueAnalysis
     });
 
     if (!doctorId || !appointmentDate || !startTime || !endTime) {
       return c.json({ error: '必須フィールドが不足しています' }, 400);
+    }
+
+    // ✅ 時刻検証を追加
+    const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    if (!timeRegex.test(startTime) || !timeRegex.test(endTime)) {
+      console.error('❌ 無効な時刻形式:', { startTime, endTime });
+      return c.json({
+        error: '無効な時刻形式です',
+        details: `開始時刻: ${startTime}, 終了時刻: ${endTime}`
+      }, 400);
     }
 
     const db = initializeDatabase(c.env);
@@ -420,103 +431,191 @@ api.post('/patient/appointments', authMiddleware(), async (c) => {
       return c.json({ error: 'Database not available' }, 500);
     }
 
+    // 日付生成部分を確認・修正（430行目付近）
     const scheduledAt = new Date(`${appointmentDate} ${startTime}`);
     const endAt = new Date(`${appointmentDate} ${endTime}`);
 
-    // 重複チェック（警告レベル）
-    const existingAppointments = await db
-      .select()
-      .from(appointments)
-      .where(
-        and(
-          eq(appointments.assignedWorkerId, doctorId),
-          eq(appointments.scheduledAt, scheduledAt),
-          or(
-            eq(appointments.status, 'scheduled'),
-            eq(appointments.status, 'waiting'),
-            eq(appointments.status, 'assigned'),
-            eq(appointments.status, 'in_progress')
-          )
-        )
-      )
-      .all();
+    console.log('📅 日付検証:', {
+      appointmentDate,
+      startTime,
+      endTime,
+      scheduledAtString: `${appointmentDate} ${startTime}`,
+      scheduledAt: scheduledAt.toISOString(),
+      scheduledAtValid: scheduledAt instanceof Date && !isNaN(scheduledAt.getTime()),
+      endAt: endAt.toISOString(),
+      endAtValid: endAt instanceof Date && !isNaN(endAt.getTime())
+    });
 
-    if (existingAppointments.length > 0) {
-      console.warn('⚠️ 同じ時間帯に予約がありますが、予約を続行します');
+    // ✅ 日付の妥当性をチェック
+    if (isNaN(scheduledAt.getTime()) || isNaN(endAt.getTime())) {
+      console.error('❌ 無効な日付:', {
+        scheduledAtString: `${appointmentDate} ${startTime}`,
+        endAtString: `${appointmentDate} ${endTime}`,
+        scheduledAtTime: scheduledAt.getTime(),
+        endAtTime: endAt.getTime()
+      });
+      return c.json({
+        error: '無効な日付形式です',
+        details: `日付: ${appointmentDate}, 開始時刻: ${startTime}, 終了時刻: ${endTime}`
+      }, 400);
     }
+
+    // ✅ 重複チェックを完全削除 - この部分を完全にコメントアウトまたは削除
+    console.log('📝 重複チェックをスキップ（シンプル予約作成モード）');
 
     const durationMinutes = Math.floor((endAt.getTime() - scheduledAt.getTime()) / 1000 / 60);
 
-    // ✅ 予約を作成
-    const result = await db
-      .insert(appointments)
-      .values({
+    console.log('📝 予約データ準備完了:', {
+      patientId: user.id,
+      assignedWorkerId: doctorId,
+      scheduledAt: scheduledAt.toISOString(),
+      endAt: endAt.toISOString(),
+      durationMinutes,
+      status: 'scheduled',
+      appointmentType: appointmentType || 'initial',
+      chiefComplaint: chiefComplaint || ''
+    });
+
+    // ✅ 予約を作成（重複チェックなし）
+    let newAppointment;
+    try {
+      console.log('💾 データベースに予約を挿入中...');
+
+      // ✅ 明示的にISO文字列に変換
+      const scheduledAtString = scheduledAt.toISOString();
+      const nowString = new Date().toISOString();
+
+      console.log('📅 タイムスタンプ変換確認:', {
+        scheduledAtOriginal: scheduledAt,
+        scheduledAtString: scheduledAtString,
+        scheduledAtType: typeof scheduledAtString,
+        nowString: nowString,
+        nowType: typeof nowString
+      });
+
+      // ✅ 挿入データオブジェクトを明示的に作成
+      const insertData = {
         patientId: user.id,
         assignedWorkerId: doctorId,
-        scheduledAt,
-        durationMinutes,
-        status: 'scheduled',
-        appointmentType: appointmentType || 'initial',
+        scheduledAt: scheduledAtString,                   // ✅ 文字列を明示
+        durationMinutes: durationMinutes,
+        status: 'scheduled' as const,
         chiefComplaint: chiefComplaint || '',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning()
-      .all();
+        appointmentType: appointmentType || 'initial',
+        meetingId: null,
+        startedAt: null,
+        endedAt: null,
+        createdAt: nowString,                             // ✅ 文字列を明示
+        updatedAt: nowString,                             // ✅ 文字列を明示
+      };
 
-    const newAppointment = result[0];
-    console.log('✅ 予約作成完了:', newAppointment.id);
+      console.log('🔍 挿入データ最終確認:', {
+        patientId: insertData.patientId,
+        assignedWorkerId: insertData.assignedWorkerId,
+        scheduledAt: { value: insertData.scheduledAt, type: typeof insertData.scheduledAt },
+        durationMinutes: insertData.durationMinutes,
+        status: insertData.status,
+        createdAt: { value: insertData.createdAt, type: typeof insertData.createdAt },
+        updatedAt: { value: insertData.updatedAt, type: typeof insertData.updatedAt }
+      });
+
+      const insertResult = await db
+        .insert(appointments)
+        .values(insertData)
+        .returning()
+        .all();
+
+      newAppointment = insertResult[0];
+      console.log('✅ 予約挿入成功:', {
+        id: newAppointment.id,
+        patientId: newAppointment.patientId,
+        assignedWorkerId: newAppointment.assignedWorkerId,
+        scheduledAt: newAppointment.scheduledAt,
+        status: newAppointment.status,
+        durationMinutes: newAppointment.durationMinutes,
+      });
+
+    } catch (insertError) {
+      console.error('❌ 予約挿入エラー:', insertError);
+
+      // ✅ エラーの詳細分析
+      if (insertError instanceof Error) {
+        console.error('❌ エラー詳細:', {
+          name: insertError.name,
+          message: insertError.message,
+          stack: insertError.stack?.substring(0, 300)
+        });
+
+        // ✅ 特定のエラーパターンをチェック
+        if (insertError.message.includes('constraint')) {
+          return c.json({
+            error: 'データベース制約エラー',
+            details: '外部キーまたは一意制約に違反しています',
+            suggestion: 'patientIdまたはassignedWorkerIdが無効です'
+          }, 400);
+        }
+
+        if (insertError.message.includes('datatype')) {
+          return c.json({
+            error: 'データ型エラー',
+            details: 'データ型が一致しません',
+            suggestion: 'タイムスタンプの形式を確認してください'
+          }, 400);
+        }
+      }
+
+      return c.json({
+        error: '予約の挿入に失敗しました',
+        details: insertError instanceof Error ? insertError.message : 'Database insert failed',
+        timestamp: new Date().toISOString()
+      }, 500);
+    }
 
     // ✅ 舌診結果がある場合は問診票に保存
-    if (tongueAnalysis) {
+    let tongueAnalysisSaved = false;
+    if (tongueAnalysis && newAppointment) {
       try {
         console.log('💾 舌診結果を問診票に保存中...');
 
-        const questionnaire = await db
-          .select()
-          .from(questionnaires)
-          .where(eq(questionnaires.appointmentId, newAppointment.id))
-          .get();
-
-        const currentAnswers = questionnaire ? JSON.parse((questionnaire.questionsAnswers as string) || '{}') : {};
-
-        // 舌診結果を問診票に追加
-        currentAnswers['tongue_analysis'] = {
-          imageData: hasImage ? imageData : null, // 画像データ（オプション）
-          analysisResult: tongueAnalysis,
-          uploadedAt: new Date().toISOString(),
-          aiProvider: 'gemini-1.5-flash',
-          patientSymptoms: chiefComplaint
+        const tongueData = {
+          tongue_analysis: {
+            imageData: hasImage ? imageData : null,
+            analysisResult: tongueAnalysis,
+            uploadedAt: new Date().toISOString(),
+            aiProvider: 'gemini-1.5-flash',
+            patientSymptoms: chiefComplaint
+          }
         };
 
-        if (questionnaire) {
-          console.log('🔄 既存問診票に舌診結果を追加');
-          await db
-            .update(questionnaires)
-            .set({
-              questionsAnswers: JSON.stringify(currentAnswers),
-              updatedAt: new Date(),
-            })
-            .where(eq(questionnaires.id, questionnaire.id))
-            .run();
-        } else {
-          console.log('➕ 新規問診票を舌診結果とともに作成');
-          await db
-            .insert(questionnaires)
-            .values({
-              appointmentId: newAppointment.id,
-              questionsAnswers: JSON.stringify(currentAnswers),
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .run();
-        }
+        // ✅ 明示的にISO文字列を作成
+        const questNowString = new Date().toISOString();
 
+        console.log('📝 問診票データ準備:', {
+          appointmentId: newAppointment.id,
+          questionsAnswers: JSON.stringify(tongueData).substring(0, 100) + '...',
+          createdAt: questNowString,
+          updatedAt: questNowString
+        });
+
+        const questionnaireInsertData = {
+          appointmentId: newAppointment.id,
+          questionsAnswers: JSON.stringify(tongueData),
+          createdAt: questNowString,                      // ✅ 文字列を明示
+          updatedAt: questNowString,                      // ✅ 文字列を明示
+        };
+
+        await db
+          .insert(questionnaires)
+          .values(questionnaireInsertData)
+          .run();
+
+        tongueAnalysisSaved = true;
         console.log('✅ 舌診結果の保存完了');
+
       } catch (questionnaireError) {
         console.error('❌ 舌診結果保存エラー:', questionnaireError);
-        // エラーがあっても予約は成功として扱う
         console.warn('⚠️ 舌診結果保存に失敗しましたが、予約は完了しました');
+        // 舌診結果保存エラーは予約作成の成功を妨げない
       }
     }
 
@@ -524,25 +623,29 @@ api.post('/patient/appointments', authMiddleware(), async (c) => {
       {
         appointment: {
           id: newAppointment.id,
-          patientId: newAppointment.patientId,
-          doctorId: newAppointment.assignedWorkerId,
-          scheduledAt: newAppointment.scheduledAt,
-          durationMinutes: newAppointment.durationMinutes,
+          patientId: newAppointment.patientId,              // ✅ camelCase
+          doctorId: newAppointment.assignedWorkerId,        // ✅ camelCase
+          scheduledAt: newAppointment.scheduledAt,          // ✅ camelCase
+          durationMinutes: newAppointment.durationMinutes,  // ✅ camelCase
           status: newAppointment.status,
-          appointmentType: newAppointment.appointmentType,
-          chiefComplaint: newAppointment.chiefComplaint,
-          createdAt: newAppointment.createdAt,
-          updatedAt: newAppointment.updatedAt,
+          appointmentType: newAppointment.appointmentType,  // ✅ camelCase
+          chiefComplaint: newAppointment.chiefComplaint,    // ✅ camelCase
+          createdAt: newAppointment.createdAt,              // ✅ camelCase
+          updatedAt: newAppointment.updatedAt,              // ✅ camelCase
         },
-        tongueAnalysisSaved: !!tongueAnalysis, // 舌診結果が保存されたかどうか
+        tongueAnalysisSaved,
+        message: '予約が正常に作成されました',
+        timestamp: new Date().toISOString()
       },
       201
     );
   } catch (error) {
-    console.error('Error creating appointment:', error);
+    console.error('❌ 予約作成処理エラー:', error);
+    // ✅ returnを追加してコード パスのエラーを解消
     return c.json({
-      error: '予約の作成に失敗しました',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      error: '予約作成処理に失敗しました',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString()
     }, 500);
   }
 });

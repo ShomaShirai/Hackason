@@ -27,7 +27,8 @@
     {
       "binding": "DB",
       "database_name": "takoyaki-db",
-      "database_id": "8ef53b46-c1cf-4fbe-93e0-6ff5ba7ec3ab",
+      // "database_id": "8ef53b46-c1cf-4fbe-93e0-6ff5ba7ec3ab",
+      "database_id": "63a21fc2ced579087d11fa52d85ecd915d367073facc42cf86ca0c03c2b041ea",
       "migrations_dir": "./drizzle"
     }
   ],

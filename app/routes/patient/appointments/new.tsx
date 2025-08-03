@@ -74,26 +74,10 @@ interface DiagnosisResponse {
   message: string;
   imageUrl?: string;
   timestamp?: string;
-
-  // ✅ 追加プロパティ
   aiProvider?: string;
   warning?: string;
 }
 
-interface AppointmentResponse {
-  appointment: {
-    id: number;
-    patientId: number;
-    doctorId: number;
-    scheduledAt: string;
-    durationMinutes: number;
-    status: string;
-    appointmentType: string;
-    chiefComplaint: string;
-    createdAt: string;
-    updatedAt: string;
-  };
-}
 
 interface ErrorResponse {
   error: string;
@@ -187,13 +171,14 @@ export default function NewAppointment() {
   // 舌診関連状態
   const [tongueAnalysisResult, setTongueAnalysisResult] = useState<TongueDiagnosisResult | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [isProcessing, setIsProcessing] = useState(false)
 
   // スロット取得関連状態
   const [slots, setSlots] = useState<DoctorSlot[]>([])
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
   const [slotsError, setSlotsError] = useState<string | null>(null)
 
+  // ✅ 不足していた状態変数を追加
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // 診療科リスト
   const specialties = [
@@ -237,34 +222,43 @@ export default function NewAppointment() {
 
       console.log('📊 取得したスロットデータ:', data)
 
-      // レスポンスに応じてスロットを設定
       if (data.slots && data.slots.length > 0) {
-        // 正式なスロットデータが返された場合
         console.log('✅ 正式スロットデータを使用')
         setSlots(data.slots)
       } else if (data.availableSlots && data.availableSlots.length > 0) {
-        // モックデータの場合は変換
         console.log('🔄 モックデータを変換中...')
         const mockSlots: DoctorSlot[] = [
           {
             doctorId: 1,
             doctorName: "田中医師",
             specialty: searchSpecialty || "内科",
-            timeSlots: data.availableSlots.map(slot => ({
-              startTime: slot.time,
-              endTime: slot.time.replace(/(\d{2}):(\d{2})/, (_, h, m) => {
-                const hour = parseInt(h);
-                const minute = parseInt(m) + 30;
-                return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-              }),
-              available: slot.available
-            }))
+            timeSlots: data.availableSlots.map(slot => {
+              // ✅ 正しい時刻計算
+              const [hour, minute] = slot.time.split(':').map(Number)
+              let endHour = hour
+              let endMinute = minute + 30
+
+              // 60分を超えた場合の処理
+              if (endMinute >= 60) {
+                endHour += 1
+                endMinute -= 60
+              }
+
+              const endTime = `${endHour.toString().padStart(2, '0')}:${endMinute.toString().padStart(2, '0')}`
+
+              console.log(`⏰ 時刻変換: ${slot.time} → ${endTime}`)
+
+              return {
+                startTime: slot.time,
+                endTime: endTime, // ✅ 正しい終了時刻
+                available: slot.available
+              }
+            })
           }
         ];
         console.log('✅ モックスロット変換完了:', mockSlots)
         setSlots(mockSlots);
       } else {
-        // データがない場合
         console.log('⚠️ 利用可能なスロットなし')
         setSlots([]);
         setSlotsError('指定された日時に利用可能なスロットがありません。');
@@ -494,167 +488,6 @@ export default function NewAppointment() {
     setTongueAnalysisResult(null)
   }
 
-  // 予約作成関数
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!selectedDoctor || !selectedSlot || !chiefComplaint.trim()) {
-      return
-    }
-
-    // 舌診結果がある場合は必須チェック
-    if (capturedImage && !tongueAnalysisResult) {
-      setSlotsError('舌診分析が完了していません。写真を撮り直すか、しばらくお待ちください。')
-      return
-    }
-
-    setSlotsError(null)
-    setIsProcessing(true)
-
-    try {
-      const token = getAuthToken('/patient')
-      if (!token) {
-        throw new Error('認証トークンが見つかりません')
-      }
-
-      console.log('🔄 予約作成開始...', {
-        doctorId: selectedDoctor,
-        appointmentDate: selectedDate,
-        startTime: selectedSlot.startTime,
-        endTime: selectedSlot.endTime,
-        appointmentType,
-        chiefComplaint: chiefComplaint.substring(0, 50) + '...',
-        hasImage: !!capturedImage,
-        hasTongueAnalysis: !!tongueAnalysisResult,
-        tongueAnalysisConfidence: tongueAnalysisResult?.confidence_score
-      })
-
-      setSlotsError('予約作成中です...')
-
-      // ✅ 舌診結果を予約作成リクエストに含める
-      const requestBody = {
-        doctorId: selectedDoctor,
-        appointmentDate: selectedDate,
-        startTime: selectedSlot.startTime,
-        endTime: selectedSlot.endTime,
-        appointmentType,
-        chiefComplaint,
-        hasImage: !!capturedImage,
-        tongueAnalysis: tongueAnalysisResult, // ✅ 舌診結果を含める
-        imageData: capturedImage // ✅ 画像データも含める（オプション）
-      }
-
-      const response = await fetch('/api/patient/appointments', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(requestBody),
-      })
-
-      console.log('📋 予約作成レスポンス:', {
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json() as ErrorResponse
-        console.error('❌ 予約作成失敗:', errorData)
-
-        if (errorData.error?.includes('すでに予約があります') ||
-          errorData.error?.includes('time slot is already taken')) {
-          setSlotsError('選択された時間帯は既に予約済みです。最新の空き時間を確認してください。')
-          await fetchAvailableSlots(selectedDate, selectedSpecialty)
-          setSelectedDoctor(null)
-          setSelectedSlot(null)
-          return
-        }
-
-        throw new Error(errorData.error || '予約の作成に失敗しました')
-      }
-
-      const appointmentData = await response.json() as AppointmentResponse & { tongueAnalysisSaved?: boolean }
-      console.log('✅ 予約作成成功:', {
-        appointmentId: appointmentData.appointment.id,
-        tongueAnalysisSaved: appointmentData.tongueAnalysisSaved
-      })
-
-      console.log('✅ 全処理完了')
-
-      if (appointmentData.tongueAnalysisSaved) {
-        setSlotsError('予約と舌診結果の保存が完了しました！')
-      } else {
-        setSlotsError('予約が完了しました！')
-      }
-
-      setTimeout(() => {
-        window.location.href = '/patient/appointments?created=true'
-      }, 1000)
-
-    } catch (err: any) {
-      console.error("❌ 予約作成エラー:", err)
-      setSlotsError(err instanceof Error ? err.message : "予約の作成中にエラーが発生しました")
-    } finally {
-      setIsProcessing(false)
-    }
-  }
-
-  // デバッグ用: 舌診エンドポイントのテスト関数（開発時のみ使用）
-  const testTongueEndpoint = async () => {
-    console.log('🧪 舌診エンドポイントテスト開始')
-
-    try {
-      const token = getAuthToken('/patient')
-
-      // まずは認証なしでテスト
-      const testResponse = await fetch('/api/test-tongue-diagnosis', {
-        method: 'GET'
-      })
-
-      console.log('🧪 テストエンドポイント:', {
-        status: testResponse.status,
-        ok: testResponse.ok
-      })
-
-      if (testResponse.ok) {
-        const testData = await testResponse.json()
-        console.log('✅ テストエンドポイント成功:', testData)
-      }
-
-      // 認証ありでテスト（小さなデータ）
-      const authTestResponse = await fetch('/api/tongue-diagnosis', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          appointmentId: 1,
-          imageData: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', // 1x1ピクセルの透明画像
-          timestamp: new Date().toISOString()
-        })
-      })
-
-      console.log('🧪 認証テスト:', {
-        status: authTestResponse.status,
-        ok: authTestResponse.ok
-      })
-
-    } catch (error) {
-      console.error('❌ エンドポイントテスト失敗:', error)
-    }
-  }
-
-  // 開発時のみ: コンポーネントマウント時にテスト実行
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-      // 5秒後にテスト実行（初期化完了を待つ）
-      setTimeout(testTongueEndpoint, 5000)
-    }
-  }, [])
-
-  // イベントハンドラー
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSelectedDate(e.target.value)
     setSelectedDoctor(null)
@@ -671,6 +504,114 @@ export default function NewAppointment() {
     fetchAvailableSlots(selectedDate, selectedSpecialty)
   }
 
+
+
+  // 予約作成部分の時刻計算を修正（500行目付近）
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsSubmitting(true) // ✅ これで setIsSubmitting が利用可能
+
+    try {
+      if (!selectedSlot || !selectedDoctor || !appointmentType || !chiefComplaint.trim()) {
+        setSlotsError('すべての必須項目を入力してください。')
+        return
+      }
+
+      // ✅ selectedSlotの終了時刻をそのまま使用（再計算不要）
+      const startTime = selectedSlot.startTime
+      const endTime = selectedSlot.endTime // ✅ すでに正しく計算済み
+
+      console.log('🔄 予約作成開始...', {
+        doctorId: selectedDoctor,
+        appointmentDate: selectedDate,
+        startTime: startTime,
+        endTime: endTime, // ✅ 正しい終了時刻
+        appointmentType,
+        chiefComplaint: chiefComplaint.substring(0, 50) + '...',
+        hasImage: !!capturedImage,
+        hasTongueAnalysis: !!tongueAnalysisResult,
+        tongueAnalysisConfidence: tongueAnalysisResult?.confidence_score
+      })
+
+      const appointmentData = {
+        doctorId: selectedDoctor,
+        appointmentDate: selectedDate,
+        startTime: startTime,
+        endTime: endTime, // ✅ 正しい終了時刻
+        appointmentType,
+        chiefComplaint,
+        hasImage: !!capturedImage,
+        tongueAnalysis: tongueAnalysisResult,
+        imageData: capturedImage
+      }
+
+      const response = await fetch('/api/patient/appointments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getAuthToken('/patient')}`,
+        },
+        body: JSON.stringify(appointmentData),
+      })
+
+      console.log('📋 予約作成レスポンス:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok
+      })
+
+      if (!response.ok) {
+        // ✅ 型安全なエラーハンドリング
+        let errorMessage = '予約の作成に失敗しました'
+        try {
+          const errorData = await response.json() as { error?: string; details?: string }
+          console.error('❌ 予約作成失敗:', errorData)
+          errorMessage = errorData.error || errorMessage
+        } catch {
+          // JSON解析に失敗した場合
+          const errorText = await response.text()
+          console.error('❌ 予約作成失敗（テキスト）:', errorText)
+        }
+        throw new Error(errorMessage)
+      }
+
+      // ✅ 型安全なレスポンスハンドリング
+      const result = await response.json() as {
+        appointment: {
+          id: number;
+          patientId: number;
+          doctorId: number;
+          scheduledAt: string;
+          durationMinutes: number;
+          status: string;
+          appointmentType: string;
+          chiefComplaint: string;
+          createdAt: string;
+          updatedAt: string;
+        };
+        tongueAnalysisSaved?: boolean;
+      }
+
+      console.log('✅ 予約作成成功:', {
+        appointmentId: result.appointment.id,
+        tongueAnalysisSaved: result.tongueAnalysisSaved
+      })
+
+      setSlotsError('✅ 予約が正常に作成されました！リダイレクトしています...')
+
+      // 成功後のリダイレクト
+      setTimeout(() => {
+        window.location.href = '/patient/appointments'
+      }, 2000)
+
+    } catch (error) {
+      console.error('❌ 予約作成エラー:', error)
+      setSlotsError(`予約の作成に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`)
+    } finally {
+      setIsSubmitting(false) // ✅ これで setIsSubmitting が利用可能
+    }
+  }
+
   const handleSlotSelect = (doctorId: number, slot: TimeSlot) => {
     if (slot.available) {
       setSelectedDoctor(doctorId)
@@ -678,11 +619,11 @@ export default function NewAppointment() {
     }
   }
 
-  // 予約ボタンの有効/無効条件
+  // 予約ボタンの有効/無効条件（isProcessingを使用）
   const canSubmit = selectedDoctor &&
     selectedSlot &&
     chiefComplaint.trim() &&
-    !isProcessing &&
+    !isSubmitting && // ✅ isProcessing → isSubmitting に変更
     !isAnalyzing &&
     (!capturedImage || tongueAnalysisResult)
 
@@ -924,7 +865,7 @@ export default function NewAppointment() {
                           type="button"
                           onClick={closeCamera}
                           className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-semibold"
-                          disabled={isAnalyzing}
+                          disabled={isAnalyzing || isSubmitting}
                         >
                           キャンセル
                         </button>
@@ -944,7 +885,7 @@ export default function NewAppointment() {
                         <button
                           type="button"
                           onClick={deleteImage}
-                          disabled={isAnalyzing}
+                          disabled={isAnalyzing || isSubmitting}
                           className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs hover:bg-red-600 flex items-center justify-center disabled:bg-gray-400"
                         >
                           ×
@@ -1036,7 +977,7 @@ export default function NewAppointment() {
                       setTongueAnalysisResult(null)
                       closeCamera()
                     }}
-                    disabled={isProcessing || isAnalyzing}
+                    disabled={isSubmitting || isAnalyzing} // ✅ isProcessing → isSubmitting
                     className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 disabled:bg-gray-100"
                   >
                     キャンセル
@@ -1046,7 +987,7 @@ export default function NewAppointment() {
                     disabled={!canSubmit}
                     className="bg-blue-500 text-white px-6 py-2 rounded-md hover:bg-blue-600 disabled:bg-gray-400"
                   >
-                    {isProcessing
+                    {isSubmitting // ✅ isProcessing → isSubmitting
                       ? "予約中..."
                       : isAnalyzing
                         ? "舌診分析中..."

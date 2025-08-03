@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import { z } from 'zod';
 
@@ -44,15 +45,14 @@ export const patients = sqliteTable('patients', {
   name: text('name').notNull(),
   passwordHash: text('password_hash').notNull(),
   phoneNumber: text('phone_number'),
-  dateOfBirth: integer('date_of_birth', { mode: 'timestamp' }),
-  gender: text('gender', { enum: ['male', 'female', 'other'] }),
+  dateOfBirth: text('date_of_birth'),
+  gender: text('gender'),
   address: text('address'),
-  emergencyContact: text('emergency_contact').default('{}'), // JSON: {name, relation, phone}
-  medicalHistory: text('medical_history').default('{}'),
-  // JSON形式: { allergies: [], medications: [], conditions: [] }
+  emergencyContact: text('emergency_contact'),
+  medicalHistory: text('medical_history'),
   profileImageUrl: text('profile_image_url'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().defaultNow(),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().defaultNow(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
 });
 
 // 医療従事者テーブル - 基準文書に合わせて修正
@@ -60,16 +60,16 @@ export const workers = sqliteTable('workers', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   email: text('email').notNull().unique(),
   name: text('name').notNull(),
-  role: text('role', {
-    enum: ['doctor', 'operator', 'admin'],
-  }).notNull(),
   passwordHash: text('password_hash').notNull(),
+  role: text('role').notNull(),
+  specialties: text('specialties'),
+  licenseNumber: text('license_number'),
+  yearsOfExperience: integer('years_of_experience'),
   phoneNumber: text('phone_number'),
-  medicalLicenseNumber: text('medical_license_number'), // 医師のみ必須
   profileImageUrl: text('profile_image_url'),
-  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().defaultNow(),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().defaultNow(),
+  bio: text('bio'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
 });
 
 // 専門科マスターテーブル
@@ -130,44 +130,27 @@ export const doctorQualifications = sqliteTable('doctor_qualifications', {
 // 予約テーブル - workerId に修正
 export const appointments = sqliteTable('appointments', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  patientId: integer('patient_id')
-    .notNull()
-    .references(() => patients.id),
-  assignedWorkerId: integer('assigned_worker_id').references(() => workers.id), // 担当医師
-  scheduledAt: integer('scheduled_at', { mode: 'timestamp' }).notNull(),
-  status: text('status', {
-    enum: ['scheduled', 'waiting', 'assigned', 'in_progress', 'completed', 'cancelled'],
-  })
-    .notNull()
-    .default('scheduled'), // 'scheduled'→'waiting'→'assigned'→'in_progress'→'completed'
+  patientId: integer('patient_id').notNull(),
+  assignedWorkerId: integer('assigned_worker_id'),
+  scheduledAt: text('scheduled_at').notNull(),              // ✅ text型（ISO文字列）
+  status: text('status').default('scheduled'),
   chiefComplaint: text('chief_complaint'),
-  meetingId: text('meeting_id'), // Amazon Chime SDK用
-  appointmentType: text('appointment_type', {
-    enum: ['initial', 'follow_up', 'emergency'],
-  }).default('initial'),
+  meetingId: text('meeting_id'),
+  appointmentType: text('appointment_type').default('initial'),
   durationMinutes: integer('duration_minutes').default(30),
-  startedAt: integer('started_at', { mode: 'timestamp' }),
-  endedAt: integer('ended_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().defaultNow(),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().defaultNow(),
+  startedAt: text('started_at'),                            // ✅ text型（ISO文字列）
+  endedAt: text('ended_at'),                                // ✅ text型（ISO文字列）
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`), // ✅ text型
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)  // ✅ text型
 });
 
 // 問診票テーブル - 基準文書に合わせて修正
 export const questionnaires = sqliteTable('questionnaires', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  appointmentId: integer('appointment_id')
-    .notNull()
-    .unique()
-    .references(() => appointments.id),
-  questionsAnswers: text('questions_answers', { mode: 'json' }).notNull(),
-  // JSON形式: { questions: [{ id, text, answer, timestamp }] }
-  aiSummary: text('ai_summary'),
-  urgencyLevel: text('urgency_level', {
-    enum: ['low', 'medium', 'high', 'critical'],
-  }),
-  completedAt: integer('completed_at', { mode: 'timestamp' }),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().defaultNow(),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().defaultNow(),
+  appointmentId: integer('appointment_id').notNull(),
+  questionsAnswers: text('questions_answers'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`), // ✅ text型
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)  // ✅ text型
 });
 
 // 診察記録テーブル（SOAP形式）
