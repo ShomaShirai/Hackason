@@ -52,7 +52,7 @@ export class TongueDiagnosisService {
     constructor(env: Env) {
         this.baseUrl = env.DIFY_BASE_URL || 'https://api.dify.ai/v1';
         this.apiKey = env.DIFY_API_KEY;
-        this.photoApiKey = env.DIFY_PHOTO_API_KEY;
+        this.photoApiKey = env.DIFY_PHOTO_API_KEY || "app-Fd9YzTjI8jdXYtEK6gDYeEF4";
 
         if (!this.apiKey || !this.photoApiKey) {
             console.error('❌ DIFY API keys are not configured:', {
